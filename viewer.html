@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Data Viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="core/firebase.js"></script>
+<script src="core/utils.js"></script>
+<style>
+:root {
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+.header{background:var(--bg-panel);border-bottom:2px solid var(--yellow);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100}
+.header-left{display:flex;align-items:center;gap:16px}
+.logo-mark{width:38px;height:38px;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:18px;color:#000}
+.company-name{font-family:var(--font-display);font-weight:700;font-size:22px}
+.company-sub{font-size:11px;color:var(--txt-muted);letter-spacing:.12em;text-transform:uppercase;margin-top:-2px}
+.header-nav{display:flex;gap:4px}
+.nav-link{padding:8px 16px;font-size:13px;color:var(--txt-secondary);letter-spacing:.04em;border-bottom:2px solid transparent;transition:color .2s}
+.nav-link:hover{color:var(--txt-primary)}
+.db-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-muted)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-muted);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.main{padding:28px;max-width:1400px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:28px;font-weight:700;margin-bottom:4px}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+
+/* DATASET TABS */
+.ds-tabs{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap}
+.ds-tab{padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);font-family:var(--font-display);font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);cursor:pointer;transition:all .2s}
+.ds-tab:hover{border-color:var(--border-bright);color:var(--txt-secondary)}
+.ds-tab.active{border-color:var(--yellow);color:var(--yellow);background:var(--bg-hover)}
+.ds-tab.empty{opacity:.4;cursor:default}
+
+/* VIEWER PANELS */
+.viewer-panel{background:var(--bg-card);border:1px solid var(--border);padding:0;display:none}
+.viewer-panel.active{display:block}
+.vp-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.vp-title{font-family:var(--font-display);font-size:16px;font-weight:700;letter-spacing:.04em}
+.vp-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)}
+.vp-body{padding:20px}
+
+/* SHARED TABLE STYLES */
+.data-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:16px}
+.data-table th{text-align:left;padding:6px 10px;font-family:var(--font-display);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);white-space:nowrap}
+.data-table td{padding:6px 10px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:top}
+.data-table td.num{font-family:var(--font-mono);color:var(--txt-primary);text-align:right;white-space:nowrap}
+.data-table td.green{color:var(--green);font-family:var(--font-mono);text-align:right}
+.data-table td.red{color:var(--red);font-family:var(--font-mono);text-align:right}
+.data-table td.yellow{color:var(--yellow);font-family:var(--font-mono);text-align:right}
+.data-table td.muted{color:var(--txt-muted);font-size:11px}
+.data-table tr.section-header td{font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-secondary);background:var(--bg-hover);padding:8px 10px;border-top:1px solid var(--border-bright)}
+.data-table tr.total-row td{font-weight:600;color:var(--txt-primary);border-top:1px solid var(--border-bright);border-bottom:2px solid var(--border-bright)}
+.data-table tr.total-row td.num{color:var(--yellow)}
+.data-table tr.indent td:first-child{padding-left:24px;color:var(--txt-muted)}
+.data-table tr:hover{background:var(--bg-hover)}
+
+.section-label{font-family:var(--font-display);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin:16px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.col2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.col3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.kpi-block{background:var(--bg-hover);border:1px solid var(--border-bright);padding:12px 16px}
+.kpi-block .kl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--txt-muted);margin-bottom:4px}
+.kpi-block .kv{font-family:var(--font-mono);font-size:18px;font-weight:700}
+.green{color:var(--green)}.yellow{color:var(--yellow)}.red{color:var(--red)}.orange{color:var(--orange)}
+
+.badge{display:inline-block;font-family:var(--font-mono);font-size:9px;padding:2px 6px;border:1px solid;border-radius:2px}
+.badge-active{border-color:var(--green);color:var(--green)}
+.badge-closed{border-color:var(--txt-muted);color:var(--txt-muted)}
+.badge-bidding{border-color:var(--yellow);color:var(--yellow)}
+.badge-rejected{border-color:var(--red);color:var(--red)}
+
+.empty-state{text-align:center;padding:60px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+.search-bar{display:flex;gap:10px;margin-bottom:14px}
+.search-bar input{flex:1;background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:8px 12px;font-size:13px;font-family:var(--font-body)}
+.search-bar input:focus{outline:none;border-color:var(--yellow)}
+.result-count{font-size:11px;color:var(--txt-muted);padding-top:2px}
+
+.sub-tabs{display:flex;gap:2px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+.sub-tab{padding:6px 14px;font-size:12px;font-family:var(--font-display);letter-spacing:.04em;text-transform:uppercase;color:var(--txt-muted);cursor:pointer;border-bottom:2px solid transparent}
+.sub-tab.active{color:var(--yellow);border-bottom-color:var(--yellow)}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <div class="logo-mark">SF</div>
+    <div><div class="company-name">Semper Fi Striping</div><div class="company-sub">Financial Platform</div></div>
+  </div>
+  <nav class="header-nav">
+    <a href="index.html" class="nav-link">Reports</a>
+    <a href="viewer.html" class="nav-link" style="color:var(--yellow);border-bottom:2px solid var(--yellow)">Viewer</a>
+    <a href="admin.html" class="nav-link">Admin</a>
+  </nav>
+  <div class="db-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-label">Connecting…</span>
+  </div>
+</header>
+
+<main class="main">
+  <div class="page-title">Data Viewer</div>
+  <div class="page-sub">Browse all structured data currently in Firebase. Last updated: <span id="last-updated">—</span></div>
+
+  <div class="ds-tabs" id="ds-tabs">
+    <div class="ds-tab empty" data-ds="pl">P&L</div>
+    <div class="ds-tab empty" data-ds="qbo-bs">Balance Sheet</div>
+    <div class="ds-tab empty" data-ds="qbo-cf">Cash Flow</div>
+    <div class="ds-tab empty" data-ds="qbo-sales">Sales</div>
+    <div class="ds-tab empty" data-ds="qbo-transactions">Transactions</div>
+    <div class="ds-tab empty" data-ds="knowify-jobs">Knowify</div>
+  </div>
+
+  <div id="viewer-panels"></div>
+</main>
+
+<script>
+let dbData = {};
+
+getDB().ref('.info/connected').on('value', snap => {
+  const ok = snap.val();
+  document.getElementById('status-dot').style.cssText = `background:${ok?'var(--green)':'var(--red)'}`;
+  document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
+});
+
+DB.onAll(data => {
+  dbData = data || {};
+  if (dbData.meta) {
+    const d = new Date(dbData.meta.lastUpdated);
+    document.getElementById('last-updated').textContent = isNaN(d) ? dbData.meta.lastUpdated : d.toLocaleString();
+  }
+  buildTabs();
+  buildPanels();
+});
+
+function buildTabs() {
+  document.querySelectorAll('.ds-tab').forEach(tab => {
+    const ds = tab.dataset.ds;
+    const key = ds === 'pl' ? 'qbo-pl' : ds;
+    const hasData = !!dbData[key] || !!dbData[ds];
+    tab.classList.toggle('empty', !hasData);
+    tab.onclick = hasData ? () => showPanel(ds) : null;
+  });
+}
+
+function showPanel(ds) {
+  document.querySelectorAll('.ds-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`[data-ds="${ds}"]`)?.classList.add('active');
+  document.querySelectorAll('.viewer-panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('vp-' + ds);
+  if (panel) panel.classList.add('active');
+}
+
+function buildPanels() {
+  const container = document.getElementById('viewer-panels');
+  const panels = [];
+
+  const plData = dbData['qbo-pl'];
+  if (plData) panels.push(buildPLPanel(plData));
+
+  const bsData = dbData['qbo-bs'];
+  if (bsData) panels.push(buildBSPanel(bsData));
+
+  const cfData = dbData['qbo-cf'];
+  if (cfData) panels.push(buildCFPanel(cfData));
+
+  const salesData = dbData['qbo-sales'];
+  if (salesData) panels.push(buildSalesPanel(salesData));
+
+  const txnData = dbData['qbo-transactions'];
+  if (txnData) panels.push(buildTxnPanel(txnData));
+
+  const knowifyData = dbData['knowify-jobs'];
+  if (knowifyData) panels.push(buildKnowifyPanel(knowifyData));
+
+  if (!panels.length) {
+    container.innerHTML = `<div class="empty-state">No data in Firebase yet.<br>Go to <a href="admin.html">Admin</a> to upload and parse your first report.</div>`;
+    return;
+  }
+
+  container.innerHTML = panels.join('');
+
+  // Activate first available tab
+  const firstTab = document.querySelector('.ds-tab:not(.empty)');
+  if (firstTab) showPanel(firstTab.dataset.ds);
+}
+
+function buildPLPanel(d) {
+  const rawRows = d.rawRows || [];
+  const tableRows = rawRows.map(r => {
+    const cls = r.isTotal ? 'total-row' : r.indent > 2 ? 'indent' : '';
+    const valStyle = r.isTotal ? 'yellow' : r.value >= 0 ? '' : '';
+    return `<tr class="${cls}"><td>${r.name}</td><td class="num ${valStyle}">${r.value!=null?fmt(r.value):'—'}</td></tr>`;
+  }).join('');
+
+  return `<div class="viewer-panel" id="vp-pl">
+    <div class="vp-header">
+      <div class="vp-title">Profit & Loss</div>
+      <div class="vp-meta">${d.meta?.period||''} · Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+    </div>
+    <div class="vp-body">
+      <div class="col3" style="margin-bottom:20px">
+        <div class="kpi-block"><div class="kl">Revenue</div><div class="kv yellow">${fmt(d.revenue)}</div></div>
+        <div class="kpi-block"><div class="kl">Gross Profit</div><div class="kv ${d.grossProfit>=0?'green':'red'}">${fmt(d.grossProfit)}</div></div>
+        <div class="kpi-block"><div class="kl">Gross Margin</div><div class="kv ${d.grossMarginPct>=20?'green':'orange'}">${d.grossMarginPct?.toFixed(1)||'—'}%</div></div>
+        <div class="kpi-block"><div class="kl">Net Op. Income</div><div class="kv ${d.netOpIncome>=0?'green':'red'}">${fmt(d.netOpIncome)}</div></div>
+        <div class="kpi-block"><div class="kl">Net Income</div><div class="kv ${d.netIncome>=0?'green':'red'}">${fmt(d.netIncome)}</div></div>
+        <div class="kpi-block"><div class="kl">Net Margin</div><div class="kv ${d.netMarginPct>=5?'green':d.netMarginPct>=0?'orange':'red'}">${d.netMarginPct?.toFixed(1)||'—'}%</div></div>
+      </div>
+      <div class="col2">
+        <div>
+          <div class="section-label">Income Statement</div>
+          <table class="data-table">
+            <tr><th>Account</th><th style="text-align:right">Amount</th></tr>
+            ${tableRows}
+          </table>
+        </div>
+        <div>
+          <div class="section-label">OpEx Breakdown</div>
+          <table class="data-table">
+            <tr><th>Category</th><th style="text-align:right">Amount</th><th style="text-align:right">% Rev</th></tr>
+            ${Object.entries(d.opex||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>
+              `<tr><td>${k}</td><td class="num">${fmt(v)}</td><td class="muted" style="text-align:right">${fmtPct(v,d.revenue)}</td></tr>`
+            ).join('')}
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildBSPanel(d) {
+  const rawRows = d.rawRows || [];
+  const tableRows = rawRows.map(r => {
+    const cls = r.isTotal ? 'total-row' : r.indent > 2 ? 'indent' : '';
+    return `<tr class="${cls}"><td>${r.name}</td><td class="num">${r.value!=null?fmt(r.value):'—'}</td></tr>`;
+  }).join('');
+
+  const debtRows = (d.ltDebts||[]).filter(x=>x.amount!==0).map(dt =>
+    `<tr><td>${dt.name}</td><td class="num red">${fmt(dt.amount)}</td></tr>`).join('');
+
+  return `<div class="viewer-panel" id="vp-qbo-bs">
+    <div class="vp-header">
+      <div class="vp-title">Balance Sheet</div>
+      <div class="vp-meta">${d.meta?.period||''} · Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+    </div>
+    <div class="vp-body">
+      <div class="col3" style="margin-bottom:20px">
+        <div class="kpi-block"><div class="kl">Total Assets</div><div class="kv green">${fmt(d.totalAssets)}</div></div>
+        <div class="kpi-block"><div class="kl">Total Liabilities</div><div class="kv red">${fmt(d.totalLiabilities)}</div></div>
+        <div class="kpi-block"><div class="kl">Total Equity</div><div class="kv ${d.totalEquity>=0?'green':'red'}">${fmt(d.totalEquity)}</div></div>
+        <div class="kpi-block"><div class="kl">Cash</div><div class="kv yellow">${fmt(d.cash)}</div></div>
+        <div class="kpi-block"><div class="kl">Accounts Receivable</div><div class="kv orange">${fmt(d.ar)}</div></div>
+        <div class="kpi-block"><div class="kl">Working Capital</div><div class="kv ${d.workingCapital>=0?'green':'red'}">${fmt(d.workingCapital)}</div></div>
+        <div class="kpi-block"><div class="kl">Current Ratio</div><div class="kv ${d.currentRatio>=1.5?'green':d.currentRatio>=1?'orange':'red'}">${d.currentRatio||'—'}x</div></div>
+        <div class="kpi-block"><div class="kl">Accounts Payable</div><div class="kv red">${fmt(d.ap)}</div></div>
+        <div class="kpi-block"><div class="kl">Long-Term Debt</div><div class="kv red">${fmt(d.longTermLiab)}</div></div>
+      </div>
+      <div class="col2">
+        <div>
+          <div class="section-label">Full Balance Sheet</div>
+          <table class="data-table">
+            <tr><th>Account</th><th style="text-align:right">Balance</th></tr>
+            ${tableRows}
+          </table>
+        </div>
+        <div>
+          <div class="section-label">Long-Term Debt Detail</div>
+          <table class="data-table">
+            <tr><th>Note</th><th style="text-align:right">Balance</th></tr>
+            ${debtRows || '<tr><td colspan="2" class="muted">No data</td></tr>'}
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildCFPanel(d) {
+  const rawRows = d.rawRows || [];
+  const cfColor = v => v > 0 ? 'green' : v < 0 ? 'red' : '';
+  return `<div class="viewer-panel" id="vp-qbo-cf">
+    <div class="vp-header">
+      <div class="vp-title">Cash Flow</div>
+      <div class="vp-meta">${d.meta?.period||''}</div>
+    </div>
+    <div class="vp-body">
+      <div class="col3" style="margin-bottom:20px">
+        <div class="kpi-block"><div class="kl">Operating CF</div><div class="kv ${cfColor(d.operatingCF)}">${fmt(d.operatingCF)}</div></div>
+        <div class="kpi-block"><div class="kl">Investing CF</div><div class="kv ${cfColor(d.investingCF)}">${fmt(d.investingCF)}</div></div>
+        <div class="kpi-block"><div class="kl">Financing CF</div><div class="kv ${cfColor(d.financingCF)}">${fmt(d.financingCF)}</div></div>
+        <div class="kpi-block"><div class="kl">Net Cash Change</div><div class="kv ${cfColor(d.netCashChange)}">${fmt(d.netCashChange)}</div></div>
+        <div class="kpi-block"><div class="kl">Beginning Cash</div><div class="kv">${fmt(d.beginCash)}</div></div>
+        <div class="kpi-block"><div class="kl">Ending Cash</div><div class="kv yellow">${fmt(d.endCash)}</div></div>
+      </div>
+      <div class="section-label">Full Cash Flow Statement</div>
+      <table class="data-table">
+        <tr><th>Line Item</th><th style="text-align:right">Amount</th></tr>
+        ${rawRows.map(r => {
+          const cls = r.isTotal ? 'total-row' : '';
+          const v = r.value;
+          return `<tr class="${cls}"><td>${r.name}</td><td class="${v>0?'green':v<0?'red':''}" style="text-align:right;font-family:var(--font-mono)">${v!=null?fmt(v):'—'}</td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+  </div>`;
+}
+
+function buildSalesPanel(d) {
+  const years = Object.keys(d.monthlyByYear||{}).sort().reverse();
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const annualRows = Object.entries(d.annualTotals||{}).sort((a,b)=>b[0]-a[0]).map(([yr,v]) =>
+    `<tr><td>${yr}</td><td class="num yellow">${fmt(v)}</td></tr>`).join('');
+
+  const custRows = (d.topCustomers||[]).slice(0,15).map((c,i) =>
+    `<tr><td class="muted">${i+1}</td><td>${c.name}</td><td class="num">${fmt(c.total)}</td><td class="muted">${c.txCount}</td></tr>`
+  ).join('');
+
+  const svcRows = (d.topServices||[]).map(s =>
+    `<tr><td>${s.name}</td><td class="num">${fmt(s.amount)}</td></tr>`).join('');
+
+  // Monthly table for most recent year
+  const latestYear = years[0];
+  const monthlyRows = latestYear ? MONTHS.map((m,i) =>
+    `<tr><td>${m}</td><td class="num">${fmt((d.monthlyByYear[latestYear]||[])[i]||0)}</td></tr>`
+  ).join('') : '';
+
+  return `<div class="viewer-panel" id="vp-qbo-sales">
+    <div class="vp-header">
+      <div class="vp-title">Sales by Customer</div>
+      <div class="vp-meta">${d.meta?.period||''}</div>
+    </div>
+    <div class="vp-body">
+      <div class="col3" style="margin-bottom:20px">
+        <div class="kpi-block"><div class="kl">Total Revenue (all years)</div><div class="kv yellow">${fmt(d.totalRevenue)}</div></div>
+        <div class="kpi-block"><div class="kl">Total Customers</div><div class="kv">${(d.topCustomers||[]).length}+</div></div>
+        <div class="kpi-block"><div class="kl">Years of Data</div><div class="kv">${years.length}</div></div>
+      </div>
+      <div class="col2">
+        <div>
+          <div class="section-label">Annual Revenue</div>
+          <table class="data-table">
+            <tr><th>Year</th><th style="text-align:right">Revenue</th></tr>
+            ${annualRows}
+          </table>
+          <div class="section-label">${latestYear} Monthly</div>
+          <table class="data-table">
+            <tr><th>Month</th><th style="text-align:right">Revenue</th></tr>
+            ${monthlyRows}
+          </table>
+        </div>
+        <div>
+          <div class="section-label">Top 15 Customers</div>
+          <table class="data-table">
+            <tr><th>#</th><th>Customer</th><th style="text-align:right">Revenue</th><th>Tx</th></tr>
+            ${custRows}
+          </table>
+        </div>
+      </div>
+      <div class="section-label">Service Mix</div>
+      <table class="data-table">
+        <tr><th>Service / Product</th><th style="text-align:right">Revenue</th></tr>
+        ${svcRows}
+      </table>
+    </div>
+  </div>`;
+}
+
+function buildTxnPanel(d) {
+  const rows = (d.accountSummary||[]).map(a =>
+    `<tr><td>${a.name}</td><td class="${a.total>=0?'green':'red'}">${fmt(a.total)}</td><td class="muted">${a.txCount}</td></tr>`
+  ).join('');
+  return `<div class="viewer-panel" id="vp-qbo-transactions">
+    <div class="vp-header">
+      <div class="vp-title">Transaction Detail by Account</div>
+      <div class="vp-meta">${d.meta?.period||''}</div>
+    </div>
+    <div class="vp-body">
+      <table class="data-table">
+        <tr><th>Account</th><th style="text-align:right">Net Balance</th><th>Transactions</th></tr>
+        ${rows}
+      </table>
+    </div>
+  </div>`;
+}
+
+function buildKnowifyPanel(d) {
+  const s = d.summary||{};
+  const sheets = ['Active','Closed','Bidding','Rejected'];
+  let activeSheet = 'Active';
+  const jobTables = {};
+
+  sheets.forEach(sh => {
+    const jobs = (d.jobs||{})[sh] || [];
+    jobTables[sh] = jobs.length ? `
+      <table class="data-table">
+        <tr><th>Job</th><th>Client</th><th>State</th><th>PM</th><th style="text-align:right">Contract</th><th style="text-align:right">Invoiced</th></tr>
+        ${jobs.map(j => `
+          <tr>
+            <td>${j.jobName||'—'}</td>
+            <td class="muted">${j.client||'—'}</td>
+            <td class="muted">${j.state||'—'}</td>
+            <td class="muted">${j.pm||'—'}</td>
+            <td class="num">${fmt(j.contractTotal)}</td>
+            <td class="num">${fmt(j.invoiced)}</td>
+          </tr>`).join('')}
+      </table>` : '<div class="empty-state" style="padding:20px">No jobs in this category.</div>';
+  });
+
+  const clientRows = (d.topClients||[]).slice(0,10).map((c,i) =>
+    `<tr><td class="muted">${i+1}</td><td>${c.name}</td><td class="num">${fmt(c.total)}</td><td class="muted">${c.count}</td></tr>`
+  ).join('');
+
+  return `<div class="viewer-panel" id="vp-knowify-jobs">
+    <div class="vp-header">
+      <div class="vp-title">Knowify — Jobs</div>
+      <div class="vp-meta">Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+    </div>
+    <div class="vp-body">
+      <div class="col3" style="margin-bottom:20px">
+        <div class="kpi-block"><div class="kl">Active Jobs</div><div class="kv green">${s.activeJobs||0}</div></div>
+        <div class="kpi-block"><div class="kl">Pipeline (Bidding)</div><div class="kv yellow">${fmt(s.pipelineTotal)}</div></div>
+        <div class="kpi-block"><div class="kl">Won Contract Value</div><div class="kv green">${fmt(s.totalWonCV)}</div></div>
+        <div class="kpi-block"><div class="kl">Total Invoiced</div><div class="kv">${fmt(s.totalInvoiced)}</div></div>
+        <div class="kpi-block"><div class="kl">Avg Contract</div><div class="kv">${fmt(s.avgContract)}</div></div>
+        <div class="kpi-block"><div class="kl">Win Rate</div><div class="kv ${s.winRate>=20?'green':'orange'}">${s.winRate||0}%</div></div>
+      </div>
+      <div class="col2" style="margin-bottom:20px">
+        <div>
+          <div class="section-label">Top Clients</div>
+          <table class="data-table">
+            <tr><th>#</th><th>Client</th><th style="text-align:right">Contract Value</th><th>Jobs</th></tr>
+            ${clientRows}
+          </table>
+        </div>
+        <div>
+          <div class="section-label">Job Count by Status</div>
+          <table class="data-table">
+            <tr><th>Status</th><th style="text-align:right">Count</th></tr>
+            <tr><td><span class="badge badge-active">ACTIVE</span></td><td class="num green">${s.activeJobs||0}</td></tr>
+            <tr><td><span class="badge badge-closed">CLOSED</span></td><td class="num">${s.closedJobs||0}</td></tr>
+            <tr><td><span class="badge badge-bidding">BIDDING</span></td><td class="num yellow">${s.biddingJobs||0}</td></tr>
+            <tr><td><span class="badge badge-rejected">REJECTED</span></td><td class="num red">${s.rejectedJobs||0}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="sub-tabs" id="knowify-sub-tabs">
+        ${sheets.map(sh => `<div class="sub-tab ${sh==='Active'?'active':''}" onclick="showKnowifySheet('${sh}')">${sh} <span class="muted">(${((d.jobs||{})[sh]||[]).length})</span></div>`).join('')}
+      </div>
+      <div id="knowify-sheet-content">${jobTables['Active']}</div>
+    </div>
+  </div>`;
+
+  // Store for later reference
+  window._knowifyJobTables = jobTables;
+}
+
+function showKnowifySheet(sh) {
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  event.target.closest('.sub-tab').classList.add('active');
+  document.getElementById('knowify-sheet-content').innerHTML = (window._knowifyJobTables||{})[sh] || '';
+}
+</script>
+</body>
+</html>

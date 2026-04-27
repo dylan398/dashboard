@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="core/firebase.js"></script>
+<script src="core/utils.js"></script>
+<script src="parsers/qbo-pl.js"></script>
+<script src="parsers/qbo-bs.js"></script>
+<script src="parsers/qbo-cf.js"></script>
+<script src="parsers/qbo-sales.js"></script>
+<script src="parsers/qbo-transactions.js"></script>
+<script src="parsers/knowify-jobs.js"></script>
+<style>
+:root {
+  --bg-base:#0d0f14; --bg-panel:#13161e; --bg-card:#191d28; --bg-hover:#1e2330;
+  --border:#252a38; --border-bright:#2e3448;
+  --yellow:#f5c842; --yellow-dim:#c9a02e; --orange:#e07b2b;
+  --red:#e05252; --green:#3ecf8e; --blue:#4a9eff;
+  --txt-primary:#e8eaf0; --txt-secondary:#8a90a0; --txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;
+  --font-body:'Barlow',sans-serif; --font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+/* NAV */
+.header{background:var(--bg-panel);border-bottom:2px solid var(--yellow);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100}
+.header-left{display:flex;align-items:center;gap:16px}
+.logo-mark{width:38px;height:38px;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:18px;color:#000}
+.company-name{font-family:var(--font-display);font-weight:700;font-size:22px}
+.company-sub{font-size:11px;color:var(--txt-muted);letter-spacing:.12em;text-transform:uppercase;margin-top:-2px}
+.header-nav{display:flex;gap:4px}
+.nav-link{padding:8px 16px;font-size:13px;color:var(--txt-secondary);letter-spacing:.04em;border-bottom:2px solid transparent;transition:color .2s}
+.nav-link:hover{color:var(--txt-primary)}
+.db-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-muted)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-muted)}
+
+/* MAIN */
+.main{padding:28px;max-width:1200px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:28px;font-weight:700;letter-spacing:.04em;margin-bottom:6px}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:28px}
+
+/* LOGIN */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:80vh}
+.login-box{background:var(--bg-card);border:1px solid var(--border);padding:40px;width:360px;text-align:center}
+.login-box h2{font-family:var(--font-display);font-size:22px;font-weight:700;margin-bottom:6px}
+.login-box p{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.login-box input{width:100%;background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:10px 14px;font-size:14px;margin-bottom:12px;font-family:var(--font-body)}
+.login-box input:focus{outline:none;border-color:var(--yellow)}
+.btn{background:var(--yellow);color:#000;border:none;padding:10px 24px;font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:opacity .2s;width:100%}
+.btn:hover{opacity:.85}
+.btn-outline{background:transparent;border:1px solid var(--border-bright);color:var(--txt-secondary);font-size:13px;font-family:var(--font-display);padding:8px 16px;cursor:pointer;transition:all .2s}
+.btn-outline:hover{border-color:var(--yellow);color:var(--yellow)}
+.btn-green{background:var(--green);color:#000}
+
+/* PARSER GRID */
+#app-screen{display:none}
+.parsers-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
+.parser-card{background:var(--bg-card);border:1px solid var(--border);padding:0;transition:border-color .2s;position:relative}
+.parser-card.has-data{border-color:var(--green)}
+.parser-card.error{border-color:var(--red)}
+.parser-card.loading{border-color:var(--yellow)}
+.pc-header{padding:16px 18px 12px;border-bottom:1px solid var(--border)}
+.pc-title{font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:2px}
+.pc-hint{font-size:11px;color:var(--txt-muted);line-height:1.5}
+.pc-body{padding:14px 18px}
+.drop-zone{border:1px dashed var(--border-bright);padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--yellow);background:rgba(245,200,66,.04)}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-zone-icon{font-size:22px;margin-bottom:6px;color:var(--txt-muted)}
+.drop-zone-text{font-size:12px;color:var(--txt-muted)}
+.drop-zone.has-file .drop-zone-icon{color:var(--green)}
+.drop-zone.has-file .drop-zone-text{color:var(--green)}
+.pc-status{font-size:11px;margin-top:10px;min-height:16px}
+.pc-status.ok{color:var(--green)}
+.pc-status.err{color:var(--red)}
+.pc-status.loading{color:var(--yellow)}
+
+/* PREVIEW AREA */
+.preview-wrap{background:var(--bg-card);border:1px solid var(--border);margin-top:28px}
+.preview-tabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
+.preview-tab{padding:10px 18px;font-size:12px;font-family:var(--font-display);letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0}
+.preview-tab.active{color:var(--yellow);border-bottom-color:var(--yellow)}
+.preview-tab.has-data{color:var(--txt-secondary)}
+.preview-content{padding:20px;min-height:200px}
+.preview-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);margin-bottom:14px;padding:6px 10px;background:var(--bg-hover);border-left:2px solid var(--border-bright)}
+.preview-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.preview-sub-title{font-family:var(--font-display);font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-muted);margin:14px 0 8px}
+.preview-table{width:100%;border-collapse:collapse;font-size:12px}
+.preview-table th{text-align:left;padding:5px 8px;font-family:var(--font-display);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:1px solid var(--border-bright)}
+.preview-table td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary)}
+.preview-table td:last-child{text-align:right;font-family:var(--font-mono);color:var(--txt-primary)}
+.preview-table tr.total td{color:var(--txt-primary);font-weight:600;border-top:1px solid var(--border-bright)}
+.preview-table tr.total td:last-child{font-family:var(--font-mono)}
+.preview-table tr.highlight td{color:var(--green)}
+.preview-table tr.highlight-strong td{color:var(--yellow);font-size:13px}
+.preview-table tr.sub td:first-child{color:var(--txt-muted);padding-left:20px}
+.preview-table tr.divider td{border:none;height:8px}
+.preview-table .muted{color:var(--txt-muted)!important;font-size:11px}
+.preview-kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.pkpi{background:var(--bg-hover);border:1px solid var(--border-bright);padding:10px 14px;min-width:130px}
+.pkpi-label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-muted);margin-bottom:4px}
+.pkpi-val{font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--txt-primary)}
+.pkpi-val.green{color:var(--green)}
+.pkpi-val.yellow{color:var(--yellow)}
+.pkpi-val.red{color:var(--red)}
+.pkpi-val.orange{color:var(--orange)}
+
+/* COMMIT PANEL */
+.commit-panel{background:var(--bg-card);border:1px solid var(--border);border-top:2px solid var(--green);padding:20px;margin-top:20px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.commit-info{font-size:13px;color:var(--txt-secondary)}
+.commit-info strong{color:var(--txt-primary)}
+.commit-status{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted);margin-top:4px;min-height:18px}
+.empty-state{text-align:center;padding:40px;color:var(--txt-muted);font-size:13px}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="logo-mark" style="margin:0 auto 16px">SF</div>
+    <h2>SFS Dashboard Admin</h2>
+    <p>Upload and parse QuickBooks & Knowify exports</p>
+    <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
+    <button class="btn" onclick="doLogin()">Enter</button>
+    <div id="login-err" style="color:var(--red);font-size:12px;margin-top:10px"></div>
+  </div>
+</div>
+
+<div id="app-screen">
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-mark">SF</div>
+      <div>
+        <div class="company-name">Semper Fi Striping</div>
+        <div class="company-sub">Financial Platform</div>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html" class="nav-link">Reports</a>
+      <a href="viewer.html" class="nav-link">Viewer</a>
+      <a href="admin.html" class="nav-link" style="color:var(--yellow);border-bottom:2px solid var(--yellow)">Admin</a>
+    </nav>
+    <div class="db-status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-label">Connecting…</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="page-title">Data Refresh</div>
+    <div class="page-sub">Drop each QuickBooks or Knowify export below. Each file is parsed and previewed before anything is saved to Firebase.</div>
+
+    <div class="parsers-grid" id="parsers-grid"></div>
+
+    <div class="preview-wrap">
+      <div class="preview-tabs" id="preview-tabs"></div>
+      <div class="preview-content" id="preview-content">
+        <div class="empty-state">Drop a file above to preview its parsed data here.</div>
+      </div>
+    </div>
+
+    <div class="commit-panel">
+      <div>
+        <div class="commit-info"><strong id="commit-count">0 datasets</strong> ready to push to Firebase</div>
+        <div class="commit-status" id="commit-status"></div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-outline" onclick="clearAll()">Clear All</button>
+        <button class="btn btn-green" onclick="pushToFirebase()">Push to Firebase →</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const APP_PASS = 'Semperfi3004!';
+const PARSERS = [PARSER_PL, PARSER_BS, PARSER_CF, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
+const parsedData = {};
+let activeTab = null;
+
+function doLogin() {
+  const val = document.getElementById('pw-input').value;
+  if (val === APP_PASS) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-screen').style.display = 'block';
+    initApp();
+  } else {
+    document.getElementById('login-err').textContent = 'Incorrect password.';
+  }
+}
+document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+
+function initApp() {
+  getDB().ref('.info/connected').on('value', snap => {
+    const ok = snap.val();
+    document.getElementById('status-dot').style.background = ok ? 'var(--green)' : 'var(--red)';
+    document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
+  });
+  buildGrid();
+  buildTabs();
+}
+
+function buildGrid() {
+  const grid = document.getElementById('parsers-grid');
+  grid.innerHTML = PARSERS.map(p => `
+    <div class="parser-card" id="card-${p.id}">
+      <div class="pc-header">
+        <div class="pc-title">${p.label}</div>
+        <div class="pc-hint">${p.hint}</div>
+      </div>
+      <div class="pc-body">
+        <div class="drop-zone" id="drop-${p.id}"
+          ondragover="dzOver(event,'${p.id}')" ondragleave="dzLeave('${p.id}')" ondrop="dzDrop(event,'${p.id}')">
+          <input type="file" accept="${p.accept}" onchange="handleFile(this,'${p.id}')">
+          <div class="drop-zone-icon">⬆</div>
+          <div class="drop-zone-text">Drop ${p.fileType.toUpperCase()} or click to browse</div>
+        </div>
+        <div class="pc-status" id="status-${p.id}"></div>
+      </div>
+    </div>`).join('');
+}
+
+function buildTabs() {
+  const tabs = document.getElementById('preview-tabs');
+  tabs.innerHTML = PARSERS.map(p =>
+    `<div class="preview-tab" id="tab-${p.id}" onclick="showTab('${p.id}')">${p.label.split('—')[1]?.trim()||p.label}</div>`
+  ).join('');
+}
+
+function dzOver(e, id) { e.preventDefault(); document.getElementById('drop-'+id).classList.add('drag-over'); }
+function dzLeave(id) { document.getElementById('drop-'+id).classList.remove('drag-over'); }
+function dzDrop(e, id) {
+  e.preventDefault();
+  dzLeave(id);
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file, id);
+}
+function handleFile(input, id) {
+  if (input.files[0]) processFile(input.files[0], id);
+}
+
+async function processFile(file, id) {
+  const parser = PARSERS.find(p => p.id === id);
+  const card = document.getElementById('card-'+id);
+  const status = document.getElementById('status-'+id);
+  const drop = document.getElementById('drop-'+id);
+
+  card.className = 'parser-card loading';
+  status.className = 'pc-status loading';
+  status.textContent = 'Parsing…';
+  drop.classList.add('has-file');
+
+  try {
+    const data = await parser.parse(file);
+    parsedData[id] = data;
+    card.className = 'parser-card has-data';
+    status.className = 'pc-status ok';
+    status.textContent = '✓ Parsed: ' + file.name;
+    document.getElementById('tab-'+id).classList.add('has-data');
+    updateCommitCount();
+    showTab(id);
+  } catch(err) {
+    card.className = 'parser-card error';
+    status.className = 'pc-status err';
+    status.textContent = '✗ Error: ' + err.message;
+    console.error(id, err);
+  }
+}
+
+function showTab(id) {
+  activeTab = id;
+  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+  const tab = document.getElementById('tab-'+id);
+  if (tab) tab.classList.add('active');
+
+  const content = document.getElementById('preview-content');
+  const parser = PARSERS.find(p => p.id === id);
+  const data = parsedData[id];
+
+  if (!data) {
+    content.innerHTML = `<div class="empty-state">No data loaded for <strong>${parser.label}</strong> yet. Drop the file above.</div>`;
+    return;
+  }
+  content.innerHTML = parser.renderPreview(data);
+}
+
+function updateCommitCount() {
+  const n = Object.keys(parsedData).length;
+  document.getElementById('commit-count').textContent = n + ' dataset' + (n!==1?'s':'');
+}
+
+function clearAll() {
+  Object.keys(parsedData).forEach(k => delete parsedData[k]);
+  document.querySelectorAll('.parser-card').forEach(c => c.className='parser-card');
+  document.querySelectorAll('.pc-status').forEach(s => { s.className='pc-status'; s.textContent=''; });
+  document.querySelectorAll('.drop-zone').forEach(d => d.classList.remove('has-file'));
+  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('has-data'));
+  document.getElementById('preview-content').innerHTML = '<div class="empty-state">Drop a file above to preview its parsed data here.</div>';
+  document.getElementById('commit-status').textContent = '';
+  updateCommitCount();
+}
+
+async function pushToFirebase() {
+  const ids = Object.keys(parsedData);
+  if (!ids.length) { alert('No data to push. Parse at least one file first.'); return; }
+
+  const status = document.getElementById('commit-status');
+  status.style.color = 'var(--yellow)';
+  status.textContent = 'Pushing to Firebase…';
+
+  try {
+    for (const id of ids) {
+      status.textContent = 'Writing ' + id + '…';
+      await DB.write(id, parsedData[id]);
+    }
+    await DB.write('meta', {
+      lastUpdated: new Date().toISOString(),
+      datasets: ids,
+      updatedBy: 'admin'
+    });
+    status.style.color = 'var(--green)';
+    status.textContent = '✓ All data pushed successfully — ' + new Date().toLocaleTimeString();
+  } catch(err) {
+    status.style.color = 'var(--red)';
+    status.textContent = '✗ Push failed: ' + err.message;
+    console.error(err);
+  }
+}
+</script>
+</body>
+</html>
