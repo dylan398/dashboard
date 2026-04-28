@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Revenue & Profit</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js"></script>
+<script src="../core/utils.js"></script>
+<script src="../core/dash.js"></script>
+<script src="../core/nav.js"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}.chart-wrap.h360{height:360px}
+
+.t{width:100%;border-collapse:collapse;font-size:12px}
+.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);white-space:nowrap}
+.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:top}
+.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.t tr.total td{font-weight:600;color:var(--txt-primary);border-top:1px solid var(--border-bright)}
+.t tr.highlight td{color:var(--green)}
+.t tr.highlight-strong td.num{color:var(--yellow);font-size:13px}
+
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+.year-pick{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.year-pick button{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:5px 12px;font-family:var(--font-mono);font-size:11px;cursor:pointer;transition:all .15s}
+.year-pick button.active{background:var(--yellow);color:#000;border-color:var(--yellow);font-weight:700}
+.year-pick button:hover{border-color:var(--yellow);color:var(--txt-primary)}
+.year-pick button.active:hover{color:#000}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Revenue & Profit</div>
+  <div class="page-sub">Annual P&L trend, monthly run rate for the current year, OpEx breakdown.</div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    No P&L data yet. Go to <a href="../admin.html">Admin</a> and upload a Profit and Loss CSV.
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Annual Trend</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Revenue, Gross Profit, Net Income</span><span class="meta">Multi-year</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-trend"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Margin %</span><span class="meta">Gross & Net</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-margin"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Monthly Run Rate (current year)</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px" id="mly-meta">—</span></div>
+    <div class="panel">
+      <div class="chart-wrap h280"><canvas id="chart-monthly"></canvas></div>
+      <div id="monthly-empty" style="display:none" class="empty-state">
+        Upload a "P&L by Month" report to see the monthly view. Set <code>Display columns by Months</code> in QuickBooks before exporting.
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Year-by-Year P&L</span><span class="year-pick" id="year-pick"></span></div>
+    <div class="grid-6040">
+      <div class="panel">
+        <div class="panel-title"><span>Income Statement</span><span class="meta" id="is-period">—</span></div>
+        <table class="t" id="t-pl"></table>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>OpEx Breakdown</span><span class="meta">Top categories</span></div>
+        <div class="chart-wrap h360"><canvas id="chart-opex"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> EBITDA & Cash Earnings</span></div>
+    <div class="panel">
+      <div class="chart-wrap h220"><canvas id="chart-ebitda"></canvas></div>
+    </div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('pl');
+setupChartTheme();
+
+let charts = {};
+let currentData = null;
+
+loadDashboard((D, raw) => {
+  if (!D || !D['qbo-pl_all'] || Object.keys(D['qbo-pl_all']).length === 0) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('content').style.display = 'none';
+    return;
+  }
+  currentData = D;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  renderKPIs(D);
+  renderTrendChart(D);
+  renderMarginChart(D);
+  renderMonthlyChart(D);
+  renderYearPicker(D);
+  const latestYr = Object.keys(D['qbo-pl_all']).sort().reverse()[0];
+  renderYearDetail(D, latestYr);
+  renderEbitdaChart(D);
+});
+
+function renderKPIs(D) {
+  const all = D['qbo-pl_all'];
+  const years = Object.keys(all).sort();
+  const latestYr = years[years.length - 1];
+  const priorYr  = years[years.length - 2];
+  const latest = all[latestYr] || {};
+  const prior  = priorYr ? all[priorYr] : {};
+
+  const isYTD = latestYr == new Date().getFullYear();
+  const kpis = [
+    { label: isYTD ? `Revenue YTD ${latestYr}` : `Revenue ${latestYr}`, value: fmtK(latest.revenue), color: 'yellow', sub: prior.revenue ? yoy(latest.revenue, prior.revenue) : '' },
+    { label: 'Gross Profit', value: fmtK(latest.grossProfit), color: latest.grossProfit >= 0 ? 'green' : 'red', sub: latest.grossMarginPct != null ? latest.grossMarginPct.toFixed(1) + '% margin' : '' },
+    { label: 'OpEx', value: fmtK(latest.opexTotal), color: 'orange', sub: latest.revenue ? (latest.opexTotal/latest.revenue*100).toFixed(1) + '% of rev' : '' },
+    { label: 'Net Income', value: fmtK(latest.netIncome), color: latest.netIncome >= 0 ? 'green' : 'red', sub: latest.netMarginPct != null ? latest.netMarginPct.toFixed(1) + '% margin' : '' },
+    { label: 'EBITDA (est.)', value: fmtK(latest.ebitda), color: latest.ebitda >= 0 ? 'green' : 'red', sub: latest.ebitda && latest.revenue ? (latest.ebitda/latest.revenue*100).toFixed(1) + '% margin' : '' },
+    { label: 'Years tracked', value: years.length, color: 'blue', sub: years[0] + '–' + years[years.length-1] },
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="kpi" style="--kpi-color:var(--${k.color})">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value ${k.color}">${k.value}</div>
+      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
+    </div>`).join('');
+}
+
+function yoy(curr, prior) {
+  if (!prior) return '';
+  const pct = ((curr - prior) / Math.abs(prior) * 100);
+  const sign = pct >= 0 ? '+' : '';
+  const cls = pct >= 0 ? 'var(--green)' : 'var(--red)';
+  return `<span style="color:${cls}">${sign}${pct.toFixed(1)}% YoY</span>`;
+}
+
+function renderTrendChart(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-trend');
+  if (charts.trend) charts.trend.destroy();
+  charts.trend = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: years, datasets: [
+      { label: 'Revenue', data: years.map(y => all[y].revenue || 0), backgroundColor: CHART_COLORS.yellow + '99', borderColor: CHART_COLORS.yellow, borderWidth: 1, order: 3 },
+      { label: 'Gross Profit', data: years.map(y => all[y].grossProfit || 0), backgroundColor: CHART_COLORS.green + 'aa', borderColor: CHART_COLORS.green, borderWidth: 1, order: 2 },
+      { label: 'Net Income', data: years.map(y => all[y].netIncome || 0), type: 'line', borderColor: CHART_COLORS.blue, backgroundColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4, order: 1 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+}
+
+function renderMarginChart(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-margin');
+  if (charts.margin) charts.margin.destroy();
+  charts.margin = new Chart(ctx, {
+    type: 'line',
+    data: { labels: years, datasets: [
+      { label: 'Gross %', data: years.map(y => all[y].grossMarginPct), borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
+      { label: 'Net %', data: years.map(y => all[y].netMarginPct), borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => v + '%' } } } },
+  });
+}
+
+function renderMonthlyChart(D) {
+  const monthly = D['qbo-pl-monthly'] || {};
+  const empty = document.getElementById('monthly-empty');
+  const canvas = document.getElementById('chart-monthly');
+  if (!monthly.revenue || !monthly.meta?.monthHeaders) {
+    empty.style.display = 'block';
+    canvas.style.display = 'none';
+    document.getElementById('mly-meta').textContent = 'no data — upload P&L with Display columns by Months';
+    return;
+  }
+  empty.style.display = 'none';
+  canvas.style.display = 'block';
+  document.getElementById('mly-meta').textContent = monthly.meta.period;
+  const months = monthly.meta.monthHeaders;
+  if (charts.monthly) charts.monthly.destroy();
+  charts.monthly = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: months, datasets: [
+      { label: 'Revenue', data: monthly.revenue.months || [], backgroundColor: CHART_COLORS.yellow + 'aa', borderColor: CHART_COLORS.yellow, borderWidth: 1 },
+      { label: 'Gross Profit', data: monthly.grossProfit?.months || [], backgroundColor: CHART_COLORS.green + 'aa', borderColor: CHART_COLORS.green, borderWidth: 1 },
+      { label: 'Net Income', data: monthly.netIncome?.months || [], type: 'line', borderColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+}
+
+function renderYearPicker(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).sort();
+  const latest = years[years.length - 1];
+  document.getElementById('year-pick').innerHTML = years.map(y =>
+    `<button onclick="renderYearDetail(currentData, '${y}')" class="${y === latest ? 'active' : ''}" data-yr="${y}">${y}</button>`
+  ).join('');
+}
+
+function renderYearDetail(D, yr) {
+  const data = D['qbo-pl_all']?.[yr] || {};
+  document.querySelectorAll('#year-pick button').forEach(b => b.classList.toggle('active', b.dataset.yr === yr));
+  document.getElementById('is-period').textContent = data.meta?.period || yr;
+  const row = (label, val, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="num">${val != null ? fmt(val) : '—'}</td></tr>`;
+  document.getElementById('t-pl').innerHTML = `
+    <thead><tr><th>Line</th><th style="text-align:right">Amount</th></tr></thead>
+    <tbody>
+      ${row('Revenue', data.revenue, 'total')}
+      ${row('Cost of Goods Sold', data.cogsTotal != null ? -data.cogsTotal : null)}
+      ${row('Gross Profit', data.grossProfit, 'total highlight')}
+      ${row('Operating Expenses', data.opexTotal != null ? -data.opexTotal : null)}
+      ${row('Net Operating Income', data.netOpIncome, 'total highlight')}
+      ${row('Net Income', data.netIncome, 'total highlight-strong')}
+      ${row('EBITDA (est.)', data.ebitda)}
+    </tbody>`;
+  // OpEx donut
+  const opex = data.opex || {};
+  const sortedOpex = Object.entries(opex).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const ctx = document.getElementById('chart-opex');
+  if (charts.opex) charts.opex.destroy();
+  if (!sortedOpex.length) return;
+  charts.opex = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: sortedOpex.map(([k]) => k), datasets: [{
+      data: sortedOpex.map(([, v]) => v),
+      backgroundColor: [CHART_COLORS.yellow, CHART_COLORS.orange, CHART_COLORS.red, CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.purple, '#c9a02e', '#e67e22', '#27ae60', '#3498db'],
+      borderWidth: 1, borderColor: 'var(--bg-card)',
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 10 } },
+        tooltip: { callbacks: { label: c => c.label + ': ' + fmt(c.parsed) } } } },
+  });
+}
+
+function renderEbitdaChart(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-ebitda');
+  if (charts.ebitda) charts.ebitda.destroy();
+  charts.ebitda = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: years, datasets: [
+      { label: 'EBITDA', data: years.map(y => all[y].ebitda || 0), backgroundColor: years.map(y => (all[y].ebitda || 0) >= 0 ? CHART_COLORS.green + 'aa' : CHART_COLORS.red + 'aa'), borderColor: years.map(y => (all[y].ebitda || 0) >= 0 ? CHART_COLORS.green : CHART_COLORS.red), borderWidth: 1 },
+      { label: 'Net Income', data: years.map(y => all[y].netIncome || 0), type: 'line', borderColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
+  });
+}
+</script>
+</body>
+</html>

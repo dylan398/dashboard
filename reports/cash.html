@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Cash & Balance</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js"></script>
+<script src="../core/utils.js"></script>
+<script src="../core/dash.js"></script>
+<script src="../core/nav.js"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}.chart-wrap.h320{height:320px}
+
+.t{width:100%;border-collapse:collapse;font-size:12px}
+.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);white-space:nowrap}
+.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:top}
+.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.t tr.total td{font-weight:600;color:var(--txt-primary);border-top:1px solid var(--border-bright)}
+.t tr.highlight td{color:var(--green)}
+.t tr.highlight-strong td.num{color:var(--yellow);font-size:13px}
+
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+.year-pick{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.year-pick button{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:5px 12px;font-family:var(--font-mono);font-size:11px;cursor:pointer}
+.year-pick button.active{background:var(--yellow);color:#000;border-color:var(--yellow);font-weight:700}
+.year-pick button:hover{border-color:var(--yellow);color:var(--txt-primary)}
+
+.snapshot-pick{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:5px 8px;font-family:var(--font-mono);font-size:11px}
+.snapshot-pick:focus{outline:none;border-color:var(--yellow);color:var(--txt-primary)}
+
+.stat-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+.stat-row:last-child{border-bottom:none}
+.stat-row-label{color:var(--txt-secondary)}
+.stat-row-value{font-family:var(--font-mono);font-weight:500}
+.stat-row-value.green{color:var(--green)}
+.stat-row-value.red{color:var(--red)}
+.stat-row-value.yellow{color:var(--yellow)}
+.stat-row-value.orange{color:var(--orange)}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Cash & Balance Sheet</div>
+  <div class="page-sub">Cash trajectory, working capital, debt schedule, balance sheet at any snapshot.</div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    No balance sheet data yet. Go to <a href="../admin.html">Admin</a> to upload Balance Sheet and Cash Flow.
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Cash Trajectory</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Cash Position Over Time</span><span class="meta" id="cash-meta">—</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-cash"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Annual Cash Flow</span><span class="meta">Operating / Investing / Financing</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-cf"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Working Capital & Liquidity</span></div>
+    <div class="grid-3">
+      <div class="panel">
+        <div class="panel-title"><span>Working Capital Trend</span><span class="meta">Across BS snapshots</span></div>
+        <div class="chart-wrap h220"><canvas id="chart-wc"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Current Ratio</span><span class="meta">Current Assets / Liab</span></div>
+        <div class="chart-wrap h220"><canvas id="chart-cr"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Debt-to-Equity</span><span class="meta">Liabilities / Equity</span></div>
+        <div class="chart-wrap h220"><canvas id="chart-de"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label">
+      <span><span class="accent">▸</span> Balance Sheet Snapshot</span>
+      <span style="display:flex;align-items:center;gap:8px"><label style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">As of:</label><select id="snap-pick" class="snapshot-pick"></select></span>
+    </div>
+    <div class="grid-6040">
+      <div class="panel">
+        <div class="panel-title"><span>Snapshot</span><span class="meta" id="bs-period">—</span></div>
+        <div class="grid-2">
+          <table class="t" id="t-bs-assets"></table>
+          <table class="t" id="t-bs-liab"></table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Long-Term Debt</span><span class="meta" id="lt-meta">—</span></div>
+        <table class="t" id="t-lt-debt"></table>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Cash Flow Statement</span><span class="year-pick" id="cf-year-pick"></span></div>
+    <div class="panel">
+      <div class="panel-title"><span>Statement of Cash Flows</span><span class="meta" id="cf-period">—</span></div>
+      <table class="t" id="t-cf"></table>
+    </div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('cash');
+setupChartTheme();
+
+let charts = {};
+let cD = null;
+
+loadDashboard((D, raw) => {
+  if (!D || (!D['qbo-bs_all'] && !D['qbo-cf_all'])) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('content').style.display = 'none';
+    return;
+  }
+  cD = D;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  renderKPIs(D);
+  renderCashChart(D);
+  renderCFChart(D);
+  renderWCCharts(D);
+  renderSnapshotPicker(D);
+  renderCFYearPicker(D);
+  const latestBS = Object.keys(D['qbo-bs_all'] || {}).sort().reverse()[0];
+  if (latestBS) renderSnapshot(latestBS);
+  const latestCF = Object.keys(D['qbo-cf_all'] || {}).sort().reverse()[0];
+  if (latestCF) renderCF(latestCF);
+});
+
+function renderKPIs(D) {
+  const bs = D['qbo-bs'] || {};
+  const cf = D['qbo-cf'] || {};
+  const ratios = balanceRatios(bs);
+  const snaps = D['qbo-bs_all'] || {};
+  const dates = Object.keys(snaps).sort();
+  const earlyCash = dates.length > 1 ? snaps[dates[0]].cash : null;
+  const cashChange = (bs.cash != null && earlyCash != null) ? bs.cash - earlyCash : null;
+
+  const kpis = [
+    { label: 'Cash', value: fmtK(bs.cash), color: bs.cash > 50000 ? 'green' : 'orange', sub: bs.meta?.period || '' },
+    { label: 'Working Capital', value: fmtK(bs.workingCapital), color: bs.workingCapital >= 0 ? 'green' : 'red', sub: ratios?.currentRatio ? ratios.currentRatio + 'x ratio' : '' },
+    { label: 'Total Liabilities', value: fmtK(bs.totalLiabilities), color: 'orange', sub: ratios?.debtToEquity != null ? ratios.debtToEquity + 'x D/E' : '' },
+    { label: 'Total Equity', value: fmtK(bs.totalEquity), color: bs.totalEquity >= 0 ? 'green' : 'red', sub: bs.totalAssets ? (bs.totalEquity/bs.totalAssets*100).toFixed(0) + '% of assets' : '' },
+    { label: 'Operating CF (latest yr)', value: fmtK(cf.operatingCF), color: cf.operatingCF >= 0 ? 'green' : 'red', sub: cf.meta?.period || '' },
+    { label: 'Cash since first snap', value: cashChange != null ? (cashChange >= 0 ? '+' : '') + fmtK(cashChange) : '—', color: cashChange >= 0 ? 'green' : 'red', sub: dates.length > 1 ? `${dates[0]} → ${dates[dates.length-1]}` : '' },
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="kpi" style="--kpi-color:var(--${k.color})">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value ${k.color}">${k.value}</div>
+      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
+    </div>`).join('');
+}
+
+function renderCashChart(D) {
+  const snaps = D['qbo-bs_all'] || {};
+  const dates = Object.keys(snaps).sort();
+  document.getElementById('cash-meta').textContent = dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '—';
+  const ctx = document.getElementById('chart-cash');
+  if (charts.cash) charts.cash.destroy();
+  charts.cash = new Chart(ctx, {
+    type: 'line',
+    data: { labels: dates, datasets: [
+      { label: 'Cash', data: dates.map(d => snaps[d].cash || 0), borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '22', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true },
+      { label: 'Working Capital', data: dates.map(d => snaps[d].workingCapital || 0), borderColor: CHART_COLORS.green, tension: 0.2, borderWidth: 2, pointRadius: 3 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+}
+
+function renderCFChart(D) {
+  const all = D['qbo-cf_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-cf');
+  if (charts.cf) charts.cf.destroy();
+  charts.cf = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: years, datasets: [
+      { label: 'Operating', data: years.map(y => all[y].operatingCF || 0), backgroundColor: CHART_COLORS.green + 'aa', stack: 's' },
+      { label: 'Investing', data: years.map(y => all[y].investingCF || 0), backgroundColor: CHART_COLORS.purple + 'aa', stack: 's' },
+      { label: 'Financing', data: years.map(y => all[y].financingCF || 0), backgroundColor: CHART_COLORS.blue + 'aa', stack: 's' },
+      { label: 'Net Change', data: years.map(y => all[y].netCashChange || 0), type: 'line', borderColor: CHART_COLORS.yellow, tension: 0.2, borderWidth: 2, pointRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+}
+
+function renderWCCharts(D) {
+  const snaps = D['qbo-bs_all'] || {};
+  const dates = Object.keys(snaps).sort();
+  const wc = dates.map(d => snaps[d].workingCapital || 0);
+  const cr = dates.map(d => snaps[d].currentRatio || 0);
+  const de = dates.map(d => {
+    const bs = snaps[d];
+    return bs.totalEquity ? +(bs.totalLiabilities / Math.abs(bs.totalEquity)).toFixed(2) : null;
+  });
+  if (charts.wc) charts.wc.destroy();
+  charts.wc = new Chart(document.getElementById('chart-wc'), {
+    type: 'line', data: { labels: dates, datasets: [{ label: 'Working Capital', data: wc, borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
+  });
+  if (charts.cr) charts.cr.destroy();
+  charts.cr = new Chart(document.getElementById('chart-cr'), {
+    type: 'line', data: { labels: dates, datasets: [{ label: 'Current Ratio', data: cr, borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+  });
+  if (charts.de) charts.de.destroy();
+  charts.de = new Chart(document.getElementById('chart-de'), {
+    type: 'line', data: { labels: dates, datasets: [{ label: 'Debt-to-Equity', data: de, borderColor: CHART_COLORS.orange, backgroundColor: CHART_COLORS.orange + '33', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+  });
+}
+
+function renderSnapshotPicker(D) {
+  const snaps = D['qbo-bs_all'] || {};
+  const dates = Object.keys(snaps).sort().reverse();
+  document.getElementById('snap-pick').innerHTML = dates.map(d =>
+    `<option value="${d}">${snaps[d].meta?.period || d}</option>`
+  ).join('');
+  document.getElementById('snap-pick').onchange = (e) => renderSnapshot(e.target.value);
+}
+
+function renderSnapshot(dateKey) {
+  const bs = cD['qbo-bs_all']?.[dateKey] || {};
+  document.getElementById('bs-period').textContent = bs.meta?.period || dateKey;
+  const row = (label, val, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="num">${val != null ? fmt(val) : '—'}</td></tr>`;
+  document.getElementById('t-bs-assets').innerHTML = `
+    <thead><tr><th colspan="2">Assets</th></tr></thead>
+    <tbody>
+      ${row('Cash & Bank', bs.cash)}
+      ${row('Accounts Receivable', bs.ar)}
+      ${row('Other Current Assets', bs.otherCurrentAssets)}
+      ${row('Total Current Assets', bs.totalCurrentAssets, 'total')}
+      ${row('Fixed Assets (net)', bs.fixedAssetsNet)}
+      ${row('Total Assets', bs.totalAssets, 'total highlight-strong')}
+    </tbody>`;
+  document.getElementById('t-bs-liab').innerHTML = `
+    <thead><tr><th colspan="2">Liabilities & Equity</th></tr></thead>
+    <tbody>
+      ${row('Accounts Payable', bs.ap)}
+      ${row('Credit Cards', bs.creditCards)}
+      ${row('Other Current Liab.', bs.otherCurrentLiab)}
+      ${row('Total Current Liab.', bs.totalCurrentLiab, 'total')}
+      ${row('Long-Term Liab.', bs.longTermLiab)}
+      ${row('Total Liabilities', bs.totalLiabilities, 'total')}
+      ${row('Total Equity', bs.totalEquity)}
+      ${row('Total Liab. + Equity', bs.totalAssets, 'total highlight-strong')}
+    </tbody>`;
+  // Long-term debt
+  const ltDebts = (bs.ltDebts || []).filter(d => d.amount !== 0);
+  document.getElementById('lt-meta').textContent = ltDebts.length ? `${ltDebts.length} notes` : '';
+  document.getElementById('t-lt-debt').innerHTML = ltDebts.length ?
+    `<thead><tr><th>Note</th><th style="text-align:right">Balance</th></tr></thead>
+     <tbody>${ltDebts.map(d => `<tr><td>${d.name}</td><td class="num">${fmt(d.amount)}</td></tr>`).join('')}
+     <tr class="total"><td>Total LT Debt</td><td class="num">${fmt(bs.longTermLiab)}</td></tr></tbody>` :
+    '<tbody><tr><td class="empty-state" colspan="2">No long-term debt detail.</td></tr></tbody>';
+}
+
+function renderCFYearPicker(D) {
+  const all = D['qbo-cf_all'] || {};
+  const years = Object.keys(all).sort();
+  const latest = years[years.length - 1];
+  document.getElementById('cf-year-pick').innerHTML = years.map(y =>
+    `<button onclick="renderCF('${y}')" class="${y === latest ? 'active' : ''}" data-yr="${y}">${y}</button>`
+  ).join('');
+}
+
+function renderCF(yr) {
+  const cf = cD['qbo-cf_all']?.[yr] || {};
+  document.querySelectorAll('#cf-year-pick button').forEach(b => b.classList.toggle('active', b.dataset.yr === yr));
+  document.getElementById('cf-period').textContent = cf.meta?.period || yr;
+  const row = (label, val, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="num" style="color:${val > 0 ? 'var(--green)' : val < 0 ? 'var(--red)' : 'inherit'}">${val != null ? fmt(val) : '—'}</td></tr>`;
+  document.getElementById('t-cf').innerHTML = `
+    <thead><tr><th>Activity</th><th style="text-align:right">Amount</th></tr></thead>
+    <tbody>
+      ${row('Net Income', cf.netIncome)}
+      ${row('Operating Activities', cf.operatingCF, 'total')}
+      ${row('Investing Activities', cf.investingCF, 'total')}
+      ${row('Financing Activities', cf.financingCF, 'total')}
+      ${row('Net Cash Change', cf.netCashChange, 'total highlight')}
+      ${row('Beginning Cash', cf.beginCash)}
+      ${row('Ending Cash', cf.endCash, 'total highlight-strong')}
+    </tbody>`;
+}
+</script>
+</body>
+</html>
