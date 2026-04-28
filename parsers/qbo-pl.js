@@ -5,13 +5,32 @@ const PARSER_PL = {
   accept: '.csv',
   hint: 'Export: Reports → Profit and Loss → Export to CSV',
   storageStrategy: 'period',  // one record per date range
+  expectedReportType: /profit\s*(and|&)\s*loss/i,
 
   getPeriodKey(data) {
-    // Extract year(s) from period string like "January 1-December 31, 2024"
+    // Extract year(s) from period string like "January 1-December 31, 2024".
+    // Single-year report → "2024". Multi-year range (rare — only if someone
+    // runs a 2024+2025 P&L in one export) → "2024_2025", which lands in its
+    // own bucket. If you ever see a multi-year key in Firebase, the export
+    // covered more than one calendar year — split it.
     const p = data.meta?.period || '';
     const years = p.match(/\d{4}/g);
     if (!years) return new Date().getFullYear().toString();
     return years.length > 1 ? `${years[0]}_${years[years.length-1]}` : years[0];
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    const allMissing = data.revenue == null && data.grossProfit == null && data.netIncome == null;
+    if (allMissing) {
+      errors.push('No revenue, gross profit, or net income found — this may not be a P&L export.');
+    } else {
+      if (data.revenue == null)   warnings.push('Total revenue line not detected.');
+      if (data.netIncome == null) warnings.push('Net income line not detected.');
+      if ((data.rawRows || []).length < 8) warnings.push('Very few rows parsed — verify the date range covers actual activity.');
+    }
+    if (data.revenue != null && data.revenue === 0) warnings.push('Revenue is zero — confirm this is the right period.');
+    return { errors, warnings };
   },
 
   async parse(file) {

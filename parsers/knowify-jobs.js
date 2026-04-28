@@ -5,6 +5,8 @@ const PARSER_KNOWIFY = {
   accept: '.xlsx',
   hint: 'Export: Knowify → Jobs → Advanced Jobs Report → Export XLSX',
   storageStrategy: 'merge',  // latest summary always current, history archived by date
+  // No expectedReportType — XLSX files don't have a header row to sniff.
+  // Wrong-zone detection relies on validate() finding zero jobs.
 
   getPeriodKey(data) {
     return data.meta?.parsedAt?.slice(0,10) || new Date().toISOString().slice(0,10);
@@ -94,6 +96,22 @@ const PARSER_KNOWIFY = {
         Rejected: (bySheet.Rejected||[]).slice(-200),
       }
     };
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    const total = data.meta?.totalJobs || 0;
+    if (total === 0) {
+      errors.push('No jobs found in any sheet — make sure all four tabs (Active, Rejected, Bidding, Closed) are present in the XLSX.');
+    }
+    const s = data.summary || {};
+    if (total > 0 && s.activeJobs === 0 && s.closedJobs === 0) {
+      warnings.push('No active or closed jobs — only bidding/rejected. Verify export covers all tabs.');
+    }
+    if (s.winRate != null && s.winRate < 5 && (s.rejectedJobs || 0) > 0) {
+      warnings.push(`Win rate is ${s.winRate}% — unusually low; verify Active and Closed tabs are populated.`);
+    }
+    return { errors, warnings };
   },
 
   renderPreview(data) {

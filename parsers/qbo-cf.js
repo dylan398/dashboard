@@ -5,12 +5,30 @@ const PARSER_CF = {
   accept: '.csv',
   hint: 'Export: Reports → Statement of Cash Flows → Export to CSV',
   storageStrategy: 'period',
+  expectedReportType: /statement\s*of\s*cash\s*flows?/i,
 
   getPeriodKey(data) {
+    // Same period-key logic as P&L. See qbo-pl.js for notes on multi-year keys.
     const p = data.meta?.period || '';
     const years = p.match(/\d{4}/g);
     if (!years) return new Date().getFullYear().toString();
     return years.length > 1 ? `${years[0]}_${years[years.length-1]}` : years[0];
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    if (data.operatingCF == null && data.investingCF == null && data.financingCF == null) {
+      errors.push('No operating, investing, or financing totals found — this may not be a Cash Flow statement.');
+    }
+    // Reconciliation: begin + net change ≈ end
+    if (data.beginCash != null && data.endCash != null && data.netCashChange != null) {
+      const lhs = data.beginCash + data.netCashChange;
+      const diff = Math.abs(lhs - data.endCash);
+      if (diff > 0.5) {
+        warnings.push(`Cash doesn't reconcile: begin (${data.beginCash}) + change (${data.netCashChange}) = ${lhs.toFixed(2)}, vs ending ${data.endCash} (off by ${diff.toFixed(2)}).`);
+      }
+    }
+    return { errors, warnings };
   },
 
   async parse(file) {

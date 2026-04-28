@@ -5,6 +5,7 @@ const PARSER_TXN = {
   accept: '.csv',
   hint: 'Export: Reports → Transaction Detail by Account → Export to CSV',
   storageStrategy: 'merge',
+  expectedReportType: /transaction\s*detail/i,
 
   getPeriodKey(data) {
     return data.meta?.period || 'all-dates';
@@ -18,7 +19,8 @@ const PARSER_TXN = {
       if (lines[i].includes('Transaction date')) { headerIdx = i; break; }
     }
     if (headerIdx < 0) throw new Error('Could not find header row in Transaction Detail CSV');
-    const period = lines[2] ? lines[2].replace(/^"|"$/g,'').replace(/,+$/,'').trim() : '';
+    const reportType = lines[0] ? lines[0].split(',')[0].replace(/^"|"$/g,'').trim() : '';
+    const period     = lines[2] ? lines[2].replace(/^"|"$/g,'').replace(/,+$/,'').trim() : '';
 
     const dateIdx=1, typeIdx=2, nameIdx=4, splitIdx=6, amtIdx=7;
     const accounts = {};
@@ -63,9 +65,20 @@ const PARSER_TXN = {
       });
 
     return {
-      meta: { period, parsedAt: new Date().toISOString() },
+      meta: { reportType, period, parsedAt: new Date().toISOString() },
       accountSummary, accountDetail
     };
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    if (!data.accountSummary || data.accountSummary.length === 0) {
+      errors.push('No account rows parsed — file may not be a Transaction Detail export.');
+    }
+    if (data.accountSummary && data.accountSummary.length < 3) {
+      warnings.push(`Only ${data.accountSummary.length} account(s) found — verify the export wasn't filtered.`);
+    }
+    return { errors, warnings };
   },
 
   renderPreview(data) {

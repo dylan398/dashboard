@@ -5,6 +5,7 @@ const PARSER_BS = {
   accept: '.csv',
   hint: 'Export: Reports → Balance Sheet → Export to CSV',
   storageStrategy: 'snapshot',  // every as-of date preserved forever
+  expectedReportType: /balance\s*sheet/i,
 
   getPeriodKey(data) {
     // "As of Apr 21, 2026" → "2026-04-21"
@@ -59,6 +60,25 @@ const PARSER_BS = {
       ltDebts,
       rawRows: rows.map(r => ({ name: r.name, value: r.value ?? null, isTotal: r.isTotal, indent: r.indent }))
     };
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    if (data.totalAssets == null && data.totalLiabilities == null && data.totalEquity == null) {
+      errors.push('No assets, liabilities, or equity totals found — this may not be a Balance Sheet.');
+    }
+    // Accounting identity: assets ≈ liabilities + equity
+    if (data.totalAssets != null && data.totalLiabilities != null && data.totalEquity != null) {
+      const lhs = data.totalAssets;
+      const rhs = data.totalLiabilities + data.totalEquity;
+      const diff = Math.abs(lhs - rhs);
+      const tol  = Math.max(1, Math.abs(lhs) * 0.001); // 0.1% tolerance, min $1
+      if (diff > tol) {
+        warnings.push(`Balance sheet doesn't balance: assets ${lhs.toFixed(2)} vs liab+equity ${rhs.toFixed(2)} (off by ${diff.toFixed(2)}).`);
+      }
+    }
+    if (data.cash == null) warnings.push('No bank accounts total found — verify export.');
+    return { errors, warnings };
   },
 
   renderPreview(data) {

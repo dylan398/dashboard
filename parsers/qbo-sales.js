@@ -5,6 +5,7 @@ const PARSER_SALES = {
   accept: '.csv',
   hint: 'Export: Reports → Sales by Customer Detail → All Dates → Export to CSV',
   storageStrategy: 'merge',  // monthly data merged, never overwritten
+  expectedReportType: /sales\s*by\s*customer/i,
 
   getPeriodKey(data) {
     return data.meta?.period || 'all-dates';
@@ -20,7 +21,8 @@ const PARSER_SALES = {
     }
     if (headerIdx < 0) throw new Error('Could not find header row in Sales by Customer CSV');
 
-    const period = lines[2] ? lines[2].replace(/^"|"$/g,'').replace(/,+$/,'').trim() : '';
+    const reportType = lines[0] ? lines[0].split(',')[0].replace(/^"|"$/g,'').trim() : '';
+    const period     = lines[2] ? lines[2].replace(/^"|"$/g,'').replace(/,+$/,'').trim() : '';
     const dateIdx=1, productIdx=4, amtIdx=8;
 
     const customers = {};
@@ -85,10 +87,20 @@ const PARSER_SALES = {
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
 
     return {
-      meta: { period, parsedAt: new Date().toISOString() },
+      meta: { reportType, period, parsedAt: new Date().toISOString() },
       topCustomers, monthlyByYear, annualTotals, topServices,
       totalRevenue: +Object.values(annualTotals).reduce((s,v)=>s+v,0).toFixed(2)
     };
+  },
+
+  validate(data) {
+    const errors = [], warnings = [];
+    if (!data.topCustomers || data.topCustomers.length === 0) {
+      errors.push('No customer rows parsed — file may be empty or in an unexpected format.');
+    }
+    if (data.totalRevenue === 0) warnings.push('Total revenue is zero — the date range may be wrong or filters may be active.');
+    if (data.totalRevenue && data.totalRevenue < 0) warnings.push('Total revenue is negative — check for credits/returns dominating the report.');
+    return { errors, warnings };
   },
 
   renderPreview(data) {
