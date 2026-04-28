@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Customers & AR</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js"></script>
+<script src="../core/utils.js"></script>
+<script src="../core/dash.js"></script>
+<script src="../core/nav.js"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--yellow-dim:#c9a02e;--orange:#e07b2b;
+  --red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+.grid-3070{display:grid;grid-template-columns:3fr 7fr;gap:14px;margin-bottom:14px}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}.chart-wrap.h300{height:300px}
+
+.t{width:100%;border-collapse:collapse;font-size:12px}
+.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
+.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
+.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.t td.muted{color:var(--txt-muted);font-size:11px}
+.t tr:hover{background:var(--bg-hover)}
+.t-scroll{max-height:520px;overflow-y:auto;background:var(--bg-card)}
+
+.note{background:rgba(74,158,255,.06);border-left:2px solid var(--blue);padding:10px 14px;font-size:12px;color:var(--txt-secondary);margin-bottom:14px;line-height:1.5}
+.note strong{color:var(--blue)}
+
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+
+/* Concentration bar */
+.conc-bar{display:flex;height:20px;background:var(--bg-hover);border:1px solid var(--border);overflow:hidden}
+.conc-seg{position:relative;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:#000;font-weight:600}
+
+.aging-row{display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:10px;padding:6px 0;font-size:13px}
+.aging-row .label{color:var(--txt-secondary);font-family:var(--font-display);text-transform:uppercase;font-size:11px;letter-spacing:.06em}
+.aging-row .bar{height:18px;background:var(--bg-hover);border:1px solid var(--border)}
+.aging-row .bar-fill{height:100%}
+.aging-row .val{font-family:var(--font-mono);text-align:right;color:var(--txt-primary)}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Customers & AR</div>
+  <div class="page-sub">Customer concentration, lifetime revenue, open invoices, days-to-pay analysis.</div>
+
+  <div class="note">
+    <strong>Days-to-pay framing:</strong> in TX construction subcontracting, an invoice is considered due when sent — there's no contractual deadline. The right metric isn't whether an invoice is "past due" but how many days it takes customers to pay. Buckets below are informational, not alarms.
+  </div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    No customer data yet. Go to <a href="../admin.html">Admin</a> to upload Sales by Customer Detail and Open Invoices.
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Customer Concentration</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">SBA lenders watch this carefully — top 5 over 40% is a flag</span></div>
+    <div class="grid-3070">
+      <div class="panel">
+        <div class="panel-title"><span>Top 5 vs Rest</span><span class="meta">Lifetime revenue</span></div>
+        <div id="conc-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Annual Revenue by Year</span><span class="meta" id="sales-meta">—</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-revenue"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Open Receivables</span><span id="ar-asof" style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">—</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Days-to-Pay Distribution</span><span class="meta">Open invoices only</span></div>
+        <div id="aging-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Days-to-Pay Stats</span><span class="meta">Across all open invoices</span></div>
+        <div id="dpd-stats"></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Open AR by Customer</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Click a row for invoice detail</span></div>
+    <div class="panel" style="padding:0">
+      <div class="t-scroll" style="max-height:540px"><table class="t" id="t-customers"><thead><tr><th>Customer</th><th>Open balance</th><th>Invoices</th><th>Oldest (days)</th><th>Average days out</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> All Open Invoices</span><span id="inv-count" style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">—</span></div>
+    <div class="panel" style="padding:0">
+      <div class="t-scroll" style="max-height:520px"><table class="t" id="t-invoices"><thead><tr><th>Customer</th><th>Invoice #</th><th>Date</th><th>Due</th><th>Days out</th><th>Amount</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Top Lifetime Customers</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">From Sales by Customer Detail · all-time</span></div>
+    <div class="panel" style="padding:0">
+      <div class="t-scroll" style="max-height:520px"><table class="t" id="t-lifetime"><thead><tr><th>#</th><th>Customer</th><th>Lifetime revenue</th><th>% of total</th><th>Transactions</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('customers');
+setupChartTheme();
+
+let charts = {};
+
+loadDashboard((D, raw) => {
+  const sales = D?.['qbo-sales'];
+  const oi = D?.['qbo-open-invoices'];
+  const ar = D?.['qbo-ar-aging'];
+  if ((!sales || !sales.topCustomers) && !oi?.invoices && !ar?.customers) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('content').style.display = 'none';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  renderKPIs(D);
+  renderConcentration(D);
+  renderRevenueChart(D);
+  renderAgingBlock(D);
+  renderDPDStats(D);
+  renderCustomersTable(D);
+  renderInvoicesTable(D);
+  renderLifetimeTable(D);
+});
+
+function renderKPIs(D) {
+  const sales = D['qbo-sales'] || {};
+  const oi    = D['qbo-open-invoices'] || {};
+  const bs    = D['qbo-bs'] || {};
+  const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
+  const conc  = customerConcentration(sales.topCustomers, sales.totalRevenue, 5);
+
+  // Effective DSO using current latest annual revenue
+  const latestPLYear = D['qbo-pl_all'] ? Object.keys(D['qbo-pl_all']).sort().reverse()[0] : null;
+  const annualRev = D['qbo-pl_all']?.[latestPLYear]?.revenue;
+  const dso = calcDSO(oi.summary?.totalOpen || bs.ar, annualRev);
+
+  const kpis = [
+    { label: 'Lifetime customers', value: sales.topCustomers?.length || 0, color: 'blue', sub: fmtK(sales.totalRevenue) + ' lifetime' },
+    { label: 'Open AR', value: fmtK(oi.summary?.totalOpen || bs.ar), color: 'yellow', sub: oi.meta?.invoiceCount ? `${oi.meta.invoiceCount} invoices` : '—' },
+    { label: 'Top 5 concentration', value: conc ? conc.pctOfTotal + '%' : '—', color: conc && conc.pctOfTotal > 60 ? 'red' : conc && conc.pctOfTotal > 40 ? 'orange' : 'green', sub: conc ? fmtK(conc.topNRevenue) : '' },
+    { label: 'Avg days to pay', value: stats ? stats.avgDays + 'd' : '—', color: 'yellow', sub: stats ? `Median ${stats.medianDays}d` : '' },
+    { label: 'Effective DSO', value: dso ? dso + 'd' : '—', color: 'orange', sub: 'AR / daily revenue' },
+    { label: 'Oldest invoice', value: stats ? stats.maxDays + 'd' : '—', color: stats && stats.maxDays > 120 ? 'orange' : 'green', sub: stats ? `90th: ${stats.p90Days}d` : '' },
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="kpi" style="--kpi-color:var(--${k.color})">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value ${k.color}">${k.value}</div>
+      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
+    </div>`).join('');
+}
+
+function renderConcentration(D) {
+  const sales = D['qbo-sales'] || {};
+  const conc = customerConcentration(sales.topCustomers, sales.totalRevenue, 5);
+  const el = document.getElementById('conc-block');
+  if (!conc) { el.innerHTML = '<div class="empty-state">No sales data.</div>'; return; }
+  const top = conc.pctOfTotal;
+  const concColor = top > 60 ? 'var(--red)' : top > 40 ? 'var(--orange)' : 'var(--green)';
+  const segments = conc.customers.map((c, i) =>
+    `<div class="conc-seg" style="width:${c.pct}%;background:${i % 2 ? 'var(--yellow-dim)' : 'var(--yellow)'}" title="${c.name}: ${c.pct}%">${c.pct >= 6 ? c.pct + '%' : ''}</div>`
+  ).join('');
+  const restPct = +(100 - top).toFixed(1);
+  const customerRows = conc.customers.map(c =>
+    `<tr><td>${c.name}</td><td class="num">${fmtK(c.revenue)}</td><td class="num muted">${c.pct}%</td></tr>`
+  ).join('');
+  el.innerHTML = `
+    <div style="font-family:var(--font-mono);font-size:28px;font-weight:700;color:${concColor};margin-bottom:4px">${top}%</div>
+    <div style="color:var(--txt-muted);font-size:11px;margin-bottom:14px">Top 5 of ${fmtK(sales.totalRevenue)} lifetime</div>
+    <div class="conc-bar">${segments}<div class="conc-seg" style="width:${restPct}%;background:var(--bg-hover);color:var(--txt-muted);border-left:1px solid var(--border-bright)">${restPct >= 6 ? 'Rest ' + restPct + '%' : ''}</div></div>
+    <table class="t" style="margin-top:14px">
+      ${customerRows}
+    </table>`;
+}
+
+function renderRevenueChart(D) {
+  const sales = D['qbo-sales'] || {};
+  const annual = sales.annualTotals || {};
+  const years = Object.keys(annual).sort();
+  const ctx = document.getElementById('chart-revenue');
+  if (charts.revenue) charts.revenue.destroy();
+  charts.revenue = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: years, datasets: [{
+      label: 'Sales by Customer ($)', data: years.map(y => annual[y] || 0),
+      backgroundColor: CHART_COLORS.yellow + 'aa', borderColor: CHART_COLORS.yellow, borderWidth: 1,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } },
+  });
+  document.getElementById('sales-meta').textContent = years.length ? `${years[0]} – ${years[years.length-1]}` : '—';
+}
+
+function renderAgingBlock(D) {
+  const oi = D['qbo-open-invoices'] || {};
+  const ar = D['qbo-ar-aging'] || {};
+  const el = document.getElementById('aging-block');
+  document.getElementById('ar-asof').textContent = oi.meta?.period || ar.meta?.period || '—';
+  // Prefer Open Invoices buckets; fall back to AR Aging buckets
+  let buckets;
+  if (oi.buckets) {
+    buckets = [
+      ['Current',     oi.buckets.current,     'var(--green)'],
+      ['1 – 30 days', oi.buckets.days1_30,    'var(--yellow)'],
+      ['31 – 60 days',oi.buckets.days31_60,   'var(--orange)'],
+      ['61 – 90 days',oi.buckets.days61_90,   'var(--orange)'],
+      ['91+ days',    oi.buckets.days91_plus, 'var(--red)'],
+    ];
+  } else if (ar.summary) {
+    buckets = [
+      ['Current',     ar.summary.current,     'var(--green)'],
+      ['1 – 30 days', ar.summary.days1_30,    'var(--yellow)'],
+      ['31 – 60 days',ar.summary.days31_60,   'var(--orange)'],
+      ['61 – 90 days',ar.summary.days61_90,   'var(--orange)'],
+      ['91+ days',    ar.summary.days91_plus, 'var(--red)'],
+    ];
+  } else {
+    el.innerHTML = '<div class="empty-state">Upload Open Invoices or A/R Aging to populate.</div>';
+    return;
+  }
+  const total = buckets.reduce((s, [, v]) => s + (v || 0), 0);
+  el.innerHTML = buckets.map(([label, val, color]) => {
+    const pct = total ? (val / total * 100).toFixed(1) : 0;
+    return `<div class="aging-row">
+      <div class="label">${label}</div>
+      <div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="val">${fmtK(val)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderDPDStats(D) {
+  const oi = D['qbo-open-invoices'] || {};
+  const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
+  const el = document.getElementById('dpd-stats');
+  if (!stats) {
+    el.innerHTML = '<div class="empty-state">Upload Open Invoices for invoice-level statistics.</div>';
+    return;
+  }
+  const rows = [
+    ['Average days to pay', stats.avgDays + 'd', ''],
+    ['Median', stats.medianDays + 'd', ''],
+    ['90th percentile', stats.p90Days + 'd', stats.p90Days > 120 ? 'orange' : ''],
+    ['Oldest invoice', stats.maxDays + 'd', stats.maxDays > 180 ? 'red' : stats.maxDays > 120 ? 'orange' : ''],
+    ['Invoices analyzed', fmtNum(stats.invoiceCount), ''],
+  ];
+  el.innerHTML = rows.map(([label, val, cls]) =>
+    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <div style="color:var(--txt-secondary)">${label}</div>
+      <div style="font-family:var(--font-mono);font-weight:600;color:${cls === 'red' ? 'var(--red)' : cls === 'orange' ? 'var(--orange)' : 'var(--txt-primary)'}">${val}</div>
+    </div>`
+  ).join('');
+}
+
+function renderCustomersTable(D) {
+  const oi = D['qbo-open-invoices'] || {};
+  const ar = D['qbo-ar-aging'] || {};
+  const tbody = document.querySelector('#t-customers tbody');
+  // Build per-customer rows with average days-out
+  if (oi.invoices) {
+    const byCust = {};
+    oi.invoices.forEach(i => {
+      if (!byCust[i.customer]) byCust[i.customer] = { name: i.customer, total: 0, count: 0, oldest: 0, daysSum: 0, daysCount: 0 };
+      byCust[i.customer].total += i.openBalance;
+      byCust[i.customer].count++;
+      const dpd = i.daysPastDue || 0;
+      if (dpd > byCust[i.customer].oldest) byCust[i.customer].oldest = dpd;
+      if (dpd >= 0) { byCust[i.customer].daysSum += dpd; byCust[i.customer].daysCount++; }
+    });
+    const rows = Object.values(byCust).sort((a, b) => b.total - a.total);
+    tbody.innerHTML = rows.map(c => {
+      const avg = c.daysCount ? (c.daysSum / c.daysCount).toFixed(0) : '—';
+      const oldestColor = c.oldest > 120 ? 'var(--red)' : c.oldest > 60 ? 'var(--orange)' : 'var(--txt-primary)';
+      return `<tr>
+        <td><strong>${c.name}</strong></td>
+        <td class="num">${fmt(c.total)}</td>
+        <td class="num">${c.count}</td>
+        <td class="num" style="color:${oldestColor}">${c.oldest}d</td>
+        <td class="num muted">${avg}d</td>
+      </tr>`;
+    }).join('');
+  } else if (ar.customers) {
+    tbody.innerHTML = ar.customers.map(c => `<tr>
+      <td><strong>${c.name}</strong></td>
+      <td class="num">${fmt(c.total)}</td>
+      <td class="num">—</td>
+      <td class="num">${c.days91_plus > 0 ? '<span style="color:var(--red)">91+</span>' : ''}</td>
+      <td class="num muted">—</td>
+    </tr>`).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No AR data.</td></tr>';
+  }
+}
+
+function renderInvoicesTable(D) {
+  const oi = D['qbo-open-invoices'] || {};
+  const tbody = document.querySelector('#t-invoices tbody');
+  if (!oi.invoices) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Upload Open Invoices for line-item view.</td></tr>';
+    document.getElementById('inv-count').textContent = '';
+    return;
+  }
+  document.getElementById('inv-count').textContent = `${oi.invoices.length} invoices · ${fmtK(oi.summary?.totalOpen)} total`;
+  const sorted = [...oi.invoices].sort((a, b) => (b.daysPastDue || 0) - (a.daysPastDue || 0));
+  tbody.innerHTML = sorted.map(i => {
+    const dpd = i.daysPastDue || 0;
+    const color = dpd > 120 ? 'var(--red)' : dpd > 60 ? 'var(--orange)' : dpd > 0 ? 'var(--yellow)' : 'var(--green)';
+    return `<tr>
+      <td>${i.customer}</td>
+      <td class="muted">#${i.num}</td>
+      <td class="muted">${i.date || '—'}</td>
+      <td class="muted">${i.dueDate || '—'}</td>
+      <td class="num" style="color:${color}">${dpd}d</td>
+      <td class="num">${fmt(i.openBalance)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderLifetimeTable(D) {
+  const sales = D['qbo-sales'] || {};
+  const tbody = document.querySelector('#t-lifetime tbody');
+  if (!sales.topCustomers || !sales.totalRevenue) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No sales data.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sales.topCustomers.map((c, i) => `<tr>
+    <td class="muted">${i + 1}</td>
+    <td><strong>${c.name}</strong></td>
+    <td class="num">${fmt(c.total)}</td>
+    <td class="num muted">${(c.total / sales.totalRevenue * 100).toFixed(1)}%</td>
+    <td class="num muted">${c.txCount || '—'}</td>
+  </tr>`).join('');
+}
+</script>
+</body>
+</html>
