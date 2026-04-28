@@ -110,6 +110,8 @@ a{color:inherit;text-decoration:none}
 .parser-card.has-data{border-color:var(--green)}
 .parser-card.error{border-color:var(--red)}
 .parser-card.loading{border-color:var(--yellow)}
+.parser-card.warn{border-color:var(--orange)}
+.parser-card.pushed{border-color:var(--blue)}
 .pc-header{padding:12px 16px 10px;border-bottom:1px solid var(--border)}
 .pc-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:2px}
 .pc-hint{font-size:11px;color:var(--txt-muted);line-height:1.5}
@@ -120,8 +122,9 @@ a{color:inherit;text-decoration:none}
 .drop-zone-icon{font-size:20px;margin-bottom:5px;color:var(--txt-muted)}
 .drop-zone-text{font-size:11px;color:var(--txt-muted)}
 .drop-zone.has-file .drop-zone-icon,.drop-zone.has-file .drop-zone-text{color:var(--green)}
-.pc-status{font-size:11px;margin-top:8px;min-height:14px}
-.pc-status.ok{color:var(--green)}.pc-status.err{color:var(--red)}.pc-status.loading{color:var(--yellow)}
+.pc-status{font-size:11px;margin-top:8px;min-height:14px;line-height:1.4}
+.pc-status.ok{color:var(--green)}.pc-status.err{color:var(--red)}.pc-status.loading{color:var(--yellow)}.pc-status.warn{color:var(--orange)}.pc-status.pushed{color:var(--blue)}
+.pc-status strong{color:var(--txt-primary)}
 
 /* PREVIEW ────────────────────────────────────────────── */
 .preview-wrap{background:var(--bg-card);border:1px solid var(--border);margin-top:14px}
@@ -133,6 +136,10 @@ a{color:inherit;text-decoration:none}
 
 .preview-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);margin-bottom:12px;padding:5px 10px;background:var(--bg-hover);border-left:2px solid var(--border-bright)}
 .preview-meta strong{color:var(--yellow)}
+.preview-warnings{margin-bottom:12px;padding:10px 12px;background:rgba(224,123,43,.06);border-left:2px solid var(--orange);font-size:12px;color:var(--orange)}
+.preview-warnings ul{margin:4px 0 0 18px;padding:0}
+.preview-warnings li{margin:2px 0;color:var(--txt-secondary)}
+.preview-warnings .pw-title{font-family:var(--font-display);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
 .preview-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .preview-sub-title{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-muted);margin:12px 0 6px}
 .preview-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -204,7 +211,7 @@ a{color:inherit;text-decoration:none}
 
   <main class="main">
     <div class="page-title">Data Management</div>
-    <div class="page-sub">All data requirements from Jan 1, 2020 to present. Upload files below to fill gaps.</div>
+    <div class="page-sub">All data requirements from Jan 1, 2020 to present. Upload files below to fill gaps. <a href="#" onclick="doLogout();return false" style="color:var(--txt-muted);margin-left:6px;font-size:11px;text-decoration:underline">log out</a></div>
 
     <!-- STATUS PANEL -->
     <div id="status-loading" style="padding:30px;text-align:center;color:var(--txt-muted);font-size:13px">
@@ -241,6 +248,7 @@ a{color:inherit;text-decoration:none}
         <div class="commit-status" id="commit-status"></div>
       </div>
       <div style="display:flex;gap:10px">
+        <button class="btn-outline" onclick="testConnection()">Test Firebase</button>
         <button class="btn-outline" onclick="clearAll()">Clear All</button>
         <button class="btn btn-green btn-sm" onclick="pushToFirebase()">Push to Firebase →</button>
       </div>
@@ -250,10 +258,16 @@ a{color:inherit;text-decoration:none}
 
 <script>
 const APP_PASS = 'Semperfi3004!';
+const SESSION_KEY = 'sfs-admin-auth';
 const PARSERS = [PARSER_PL, PARSER_BS, PARSER_CF, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
-const parsedData = {};
+const parsedData = {};      // { id: parsedDataObject }
+const parsedWarnings = {};  // { id: ['warning text', ...] }
+const pushResults = {};     // { id: { ok: bool, key?: string, error?: string } }
 let activeTab = null;
 let firebaseManifest = {};
+
+// Friendly parser name (drops the "QuickBooks — " prefix)
+function parserShortLabel(p) { return p.label.split('—')[1]?.trim() || p.label; }
 
 // ── DATA REQUIREMENTS ─────────────────────────────────────────
 // Everything starts Jan 1, 2020
@@ -625,6 +639,11 @@ async function processFile(file, id) {
   const status = document.getElementById('status-'+id);
   const drop = document.getElementById('drop-'+id);
 
+  // Reset prior state for this slot
+  delete parsedData[id];
+  delete parsedWarnings[id];
+  delete pushResults[id];
+
   card.className = 'parser-card loading';
   status.className = 'pc-status loading';
   status.textContent = 'Parsing…';
@@ -632,11 +651,49 @@ async function processFile(file, id) {
 
   try {
     const data = await parser.parse(file);
+
+    // ── Wrong-zone detection (CSV parsers only — XLSX has no header to sniff)
+    if (parser.expectedReportType && data.meta?.reportType) {
+      const rt = data.meta.reportType;
+      if (!parser.expectedReportType.test(rt)) {
+        const correct = PARSERS.find(p => p.expectedReportType && p.expectedReportType.test(rt));
+        const suggestion = correct
+          ? ` This looks like a <strong>${rt}</strong> — try the <strong>${parserShortLabel(correct)}</strong> drop zone instead.`
+          : ` File header reads <strong>"${rt}"</strong> — verify the export type.`;
+        card.className = 'parser-card error';
+        status.className = 'pc-status err';
+        status.innerHTML = '✗ Wrong file type.' + suggestion;
+        drop.classList.remove('has-file');
+        updateCommitCount();
+        return;
+      }
+    }
+
+    // ── Sanity validation
+    const result = parser.validate ? parser.validate(data) : { errors: [], warnings: [] };
+    if (result.errors && result.errors.length) {
+      card.className = 'parser-card error';
+      status.className = 'pc-status err';
+      status.innerHTML = '✗ ' + result.errors.join('<br>✗ ');
+      drop.classList.remove('has-file');
+      updateCommitCount();
+      return;
+    }
+
+    // ── Stage the data
     parsedData[id] = data;
-    card.className = 'parser-card has-data';
-    status.className = 'pc-status ok';
+    parsedWarnings[id] = result.warnings || [];
+
     const key = parser.getPeriodKey(data);
-    status.textContent = `✓ ${file.name} → key: ${key}`;
+    if (parsedWarnings[id].length) {
+      card.className = 'parser-card warn';
+      status.className = 'pc-status warn';
+      status.innerHTML = `⚠ <strong>${file.name}</strong> → key: ${key} · ${parsedWarnings[id].length} warning${parsedWarnings[id].length>1?'s':''} (see preview)`;
+    } else {
+      card.className = 'parser-card has-data';
+      status.className = 'pc-status ok';
+      status.innerHTML = `✓ <strong>${file.name}</strong> → key: ${key}`;
+    }
     document.getElementById('tab-'+id).classList.add('has-data');
     updateCommitCount();
     showTab(id);
@@ -644,7 +701,9 @@ async function processFile(file, id) {
     card.className = 'parser-card error';
     status.className = 'pc-status err';
     status.textContent = '✗ ' + err.message;
+    drop.classList.remove('has-file');
     console.error(id, err);
+    updateCommitCount();
   }
 }
 
@@ -659,7 +718,15 @@ function showTab(id) {
     content.innerHTML = `<div class="empty-state">No data for <strong>${parser.label}</strong> yet.</div>`;
     return;
   }
-  content.innerHTML = parser.renderPreview(data);
+  // Surface validation warnings above the preview if any
+  const warns = parsedWarnings[id] || [];
+  const warningHTML = warns.length
+    ? `<div class="preview-warnings">
+         <div class="pw-title">⚠ ${warns.length} sanity warning${warns.length>1?'s':''} — review before pushing</div>
+         <ul>${warns.map(w => `<li>${w}</li>`).join('')}</ul>
+       </div>`
+    : '';
+  content.innerHTML = warningHTML + parser.renderPreview(data);
 }
 
 function updateCommitCount() {
@@ -669,6 +736,8 @@ function updateCommitCount() {
 
 function clearAll() {
   Object.keys(parsedData).forEach(k=>delete parsedData[k]);
+  Object.keys(parsedWarnings).forEach(k=>delete parsedWarnings[k]);
+  Object.keys(pushResults).forEach(k=>delete pushResults[k]);
   document.querySelectorAll('.parser-card').forEach(c=>c.className='parser-card');
   document.querySelectorAll('.pc-status').forEach(s=>{s.className='pc-status';s.textContent=''});
   document.querySelectorAll('.drop-zone').forEach(d=>d.classList.remove('has-file'));
@@ -679,22 +748,35 @@ function clearAll() {
 }
 
 // ── FIREBASE PUSH ────────────────────────────────────────────
-async function pushToFirebase() {
-  const ids = Object.keys(parsedData);
-  if (!ids.length) { alert('No data to push. Parse at least one file first.'); return; }
+// Pushes each staged dataset independently. A failure on one doesn't
+// abort the others — we collect per-dataset results, then render them.
+// Already-successful pushes are skipped on retry.
+async function pushToFirebase(retryOnly = false) {
+  const allIds = Object.keys(parsedData);
+  const ids = retryOnly ? allIds.filter(id => pushResults[id] && !pushResults[id].ok) : allIds;
+  if (!ids.length) {
+    alert(retryOnly ? 'Nothing to retry.' : 'No data to push. Parse at least one file first.');
+    return;
+  }
 
   const status = document.getElementById('commit-status');
   status.style.color = 'var(--yellow)';
-  status.textContent = 'Pushing to Firebase…';
+  status.innerHTML = `<span class="loading-spinner"></span>Pushing ${ids.length} dataset${ids.length>1?'s':''}…`;
 
-  try {
-    for (const id of ids) {
-      const parser = PARSERS.find(p => p.id === id);
-      const data = parsedData[id];
-      const strategy = parser.storageStrategy || 'period';
-      const key = parser.getPeriodKey(data);
-      status.textContent = `Writing ${id} (${strategy}: ${key})…`;
+  for (const id of ids) {
+    const parser = PARSERS.find(p => p.id === id);
+    const data = parsedData[id];
+    const strategy = parser.storageStrategy || 'period';
+    const key = parser.getPeriodKey(data);
+    const card = document.getElementById('card-'+id);
+    const statusEl = document.getElementById('status-'+id);
 
+    if (statusEl) {
+      statusEl.className = 'pc-status loading';
+      statusEl.innerHTML = `<span class="loading-spinner"></span>Pushing ${strategy}:${key}…`;
+    }
+
+    try {
       if (strategy === 'period') {
         await DB.writePeriod(id, key, data);
       } else if (strategy === 'snapshot') {
@@ -705,31 +787,96 @@ async function pushToFirebase() {
         else if (id === 'knowify-jobs')     await DB.mergeKnowifyData(data);
         else await DB.writePeriod(id, key, data);
       }
+      pushResults[id] = { ok: true, key };
+      if (card) card.className = 'parser-card pushed';
+      if (statusEl) {
+        statusEl.className = 'pc-status pushed';
+        statusEl.innerHTML = `✓ Pushed → key: ${key}`;
+      }
+    } catch(err) {
+      pushResults[id] = { ok: false, key, error: err.message || String(err) };
+      if (card) card.className = 'parser-card error';
+      if (statusEl) {
+        statusEl.className = 'pc-status err';
+        statusEl.innerHTML = `✗ Push failed: ${err.message}`;
+      }
+      console.error('Push failed for', id, err);
     }
-    await DB.writeMeta(ids);
+  }
+
+  // Best-effort meta write (non-fatal)
+  try { await DB.writeMeta(Object.keys(parsedData)); } catch(e) { console.warn('meta write failed', e); }
+
+  renderPushResults();
+  setTimeout(() => refreshStatusPanel(), 1200);
+}
+
+function renderPushResults() {
+  const status = document.getElementById('commit-status');
+  const allResults = Object.entries(pushResults);
+  const ok    = allResults.filter(([,r]) => r.ok).length;
+  const fail  = allResults.filter(([,r]) => !r.ok).length;
+  const failed = allResults.filter(([,r]) => !r.ok);
+
+  if (fail === 0) {
     status.style.color = 'var(--green)';
-    status.textContent = '✓ Pushed — ' + new Date().toLocaleTimeString();
-    // Refresh status panel
-    setTimeout(() => refreshStatusPanel(), 1500);
-  } catch(err) {
+    status.innerHTML = `✓ Pushed ${ok} dataset${ok!==1?'s':''} at ${new Date().toLocaleTimeString()}`;
+  } else {
     status.style.color = 'var(--red)';
-    status.textContent = '✗ ' + err.message;
-    console.error(err);
+    const failList = failed.map(([id, r]) => {
+      const p = PARSERS.find(pp => pp.id === id);
+      return `<strong>${parserShortLabel(p)}</strong>: ${r.error}`;
+    }).join(' · ');
+    status.innerHTML = `<span style="color:var(--green)">${ok} ok</span> / <span style="color:var(--red)">${fail} failed</span> — ${failList} <button class="btn-outline" style="margin-left:8px;padding:3px 10px" onclick="pushToFirebase(true)">Retry failed</button>`;
+  }
+}
+
+// ── TEST CONNECTION ──────────────────────────────────────────
+async function testConnection() {
+  const status = document.getElementById('commit-status');
+  status.style.color = 'var(--yellow)';
+  status.innerHTML = '<span class="loading-spinner"></span>Testing Firebase…';
+  try {
+    const result = await Promise.race([
+      DB.read('dashboard/_manifest'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out after 3s — check network or Firebase rules')), 3000))
+    ]);
+    const datasets = result ? Object.keys(result).filter(k => k !== '_ts').length : 0;
+    status.style.color = 'var(--green)';
+    status.innerHTML = `✓ Firebase reachable · manifest has ${datasets} dataset${datasets!==1?'s':''}`;
+  } catch (err) {
+    status.style.color = 'var(--red)';
+    status.innerHTML = `✗ ${err.message}`;
   }
 }
 
 // ── INIT ─────────────────────────────────────────────────────
+function enterApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  initApp();
+}
+
+function doLogout() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
+  location.reload();
+}
+
 function doLogin() {
   const val = document.getElementById('pw-input').value;
   if (val === APP_PASS) {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'block';
-    initApp();
+    try { sessionStorage.setItem(SESSION_KEY, '1'); } catch(e) { /* private mode */ }
+    enterApp();
   } else {
     document.getElementById('login-err').textContent = 'Incorrect password.';
   }
 }
 document.getElementById('pw-input').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+// Skip login if this tab already authenticated
+try {
+  if (sessionStorage.getItem(SESSION_KEY) === '1') enterApp();
+} catch(e) { /* sessionStorage unavailable */ }
 
 function initApp() {
   getDB().ref('.info/connected').on('value', snap => {
