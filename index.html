@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SFS — Financial Reports</title>
+<title>SFS — Overview</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="core/firebase.js"></script>
 <script src="core/utils.js"></script>
+<script src="core/dash.js"></script>
+<script src="core/nav.js"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -23,641 +25,330 @@
 html{scroll-behavior:smooth}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
-.header{background:var(--bg-panel);border-bottom:2px solid var(--yellow);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100}
-.header-left{display:flex;align-items:center;gap:16px}
-.logo-mark{width:38px;height:38px;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:18px;color:#000}
-.company-name{font-family:var(--font-display);font-weight:700;font-size:22px}
-.company-sub{font-size:11px;color:var(--txt-muted);letter-spacing:.12em;text-transform:uppercase;margin-top:-2px}
-.header-nav{display:flex;gap:4px}
-.nav-link{padding:8px 16px;font-size:13px;color:var(--txt-secondary);letter-spacing:.04em;border-bottom:2px solid transparent;transition:color .2s}
-.nav-link:hover{color:var(--txt-primary)}
-.db-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-muted)}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-muted);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.main{padding:24px 28px;max-width:1600px;margin:0 auto}
-.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:10px;padding-left:2px}
-.section-label .accent{color:var(--yellow);margin-right:6px}
 
-/* KPI ROW */
-.kpi-row{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:24px}
-.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden;transition:border-color .2s}
-.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border))}
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+.section-label a{color:var(--blue);font-size:11px;letter-spacing:.04em;text-transform:none}
+.section-label a:hover{color:var(--yellow)}
+
+/* KPI strip */
+.kpi-row{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:16px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden;transition:border-color .2s;cursor:pointer}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
 .kpi:hover{border-color:var(--border-bright)}
 .kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
 .kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
-.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:4px}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
 .kpi-sub .up{color:var(--green)}.kpi-sub .down{color:var(--red)}.kpi-sub .warn{color:var(--orange)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
 
-/* GRIDS */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px}
-.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:16px;margin-bottom:24px}
-.grid-3col{display:grid;grid-template-columns:2fr 1.2fr 1fr;gap:16px;margin-bottom:24px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+.grid-7030{display:grid;grid-template-columns:7fr 3fr;gap:14px;margin-bottom:14px}
 
-/* PANELS */
-.panel{background:var(--bg-card);border:1px solid var(--border);padding:20px}
-.panel-title{font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.badge{font-size:10px;font-family:var(--font-mono);background:var(--bg-hover);padding:2px 8px;border:1px solid var(--border-bright);color:var(--txt-muted);letter-spacing:.04em}
-.badge.yellow{border-color:var(--yellow);color:var(--yellow)}
-.badge.green{border-color:var(--green);color:var(--green)}
-.badge.red{border-color:var(--red);color:var(--red)}
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+.panel-title a{color:var(--blue);font-size:10px;letter-spacing:.04em}
+.panel-title a:hover{color:var(--yellow)}
 
-/* CHARTS */
 .chart-wrap{position:relative;width:100%}
-.chart-wrap.h260{height:260px}.chart-wrap.h220{height:220px}
-.chart-wrap.h200{height:200px}.chart-wrap.h180{height:180px}
+.chart-wrap.h260{height:260px}.chart-wrap.h220{height:220px}.chart-wrap.h200{height:200px}.chart-wrap.h180{height:180px}
 
-/* STAT ROWS */
-.stat-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
 .stat-row:last-child{border-bottom:none}
-.stat-row-label{font-size:12px;color:var(--txt-secondary);display:flex;align-items:center;gap:8px}
-.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.stat-row-value{font-family:var(--font-mono);font-size:13px;font-weight:500}
+.stat-row-label{color:var(--txt-secondary);display:flex;align-items:center;gap:8px}
+.stat-row-value{font-family:var(--font-mono);color:var(--txt-primary);font-weight:500}
+.stat-row-value.green{color:var(--green)}
+.stat-row-value.red{color:var(--red)}
+.stat-row-value.yellow{color:var(--yellow)}
+.stat-row-value.orange{color:var(--orange)}
+.stat-row-value.muted{color:var(--txt-muted)}
 
-/* P&L ROWS */
-.pl-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)}
-.pl-row:last-child{border-bottom:none}
-.pl-row.total{border-top:2px solid var(--border-bright);border-bottom:2px solid var(--border-bright);margin:4px 0;padding:10px 0}
-.pl-row.sub{padding-left:16px}
-.pl-name{font-size:12px;color:var(--txt-secondary)}
-.pl-row.total .pl-name{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--txt-primary);text-transform:uppercase;letter-spacing:.04em}
-.pl-pct{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);min-width:44px;text-align:right}
-.pl-val{font-family:var(--font-mono);font-size:13px;font-weight:500;min-width:90px;text-align:right}
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+.timestamp{color:var(--txt-muted);font-size:11px;font-family:var(--font-mono)}
 
-/* CUSTOMER TABLE */
-.cust-row{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);transition:background .15s}
-.cust-row:hover{background:var(--bg-hover);margin:0 -20px;padding:7px 20px}
-.cust-row:last-child{border-bottom:none}
-.cust-rank{font-family:var(--font-mono);font-size:10px;color:var(--txt-muted);width:18px}
-.cust-name{font-size:12px;color:var(--txt-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cust-bar-wrap{height:4px;background:var(--border)}
-.cust-bar-fill{height:100%;background:var(--yellow)}
-.cust-val{font-family:var(--font-mono);font-size:12px;font-weight:500;min-width:72px;text-align:right}
-
-/* DEBT */
-.debt-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)}
-.debt-row:last-child{border-bottom:none}
-.debt-name{font-size:12px;color:var(--txt-secondary)}
-.debt-type{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;padding:2px 6px;background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-muted)}
-.debt-val{font-family:var(--font-mono);font-size:12px;font-weight:500;min-width:90px;text-align:right}
-
-/* ALERTS */
-.alert-box{border-left:3px solid var(--alert-color,var(--orange));background:var(--bg-hover);padding:10px 14px;margin:10px 0;font-size:12px;color:var(--txt-secondary)}
-.alert-box strong{color:var(--alert-color,var(--orange));font-family:var(--font-display);font-size:13px;letter-spacing:.04em}
-.alert-green{--alert-color:var(--green)}.alert-red{--alert-color:var(--red)}
-
-/* METRIC BLOCKS */
-.metric-block{background:var(--bg-hover);border:1px solid var(--border-bright);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-.metric-block:last-child{margin-bottom:0}
-.metric-label{font-size:11px;color:var(--txt-muted);text-transform:uppercase;letter-spacing:.08em}
-.metric-val{font-family:var(--font-mono);font-size:18px;font-weight:700}
-.metric-note{font-size:10px;color:var(--txt-muted);margin-top:2px}
-
-/* YOY */
-.yoy-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-.yoy-cell{background:var(--bg-hover);border:1px solid var(--border);padding:10px 12px;text-align:center}
-.yoy-label{font-size:10px;color:var(--txt-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
-.yoy-val{font-family:var(--font-mono);font-size:16px;font-weight:700}
-.yoy-change{font-size:11px;margin-top:4px}
-
-.empty-dash{text-align:center;padding:60px 20px;color:var(--txt-muted);font-size:13px}
-.empty-dash a{color:var(--yellow)}
-
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:var(--bg-base)}
-::-webkit-scrollbar-thumb{background:var(--border-bright)}
+.report-tile{padding:16px;background:var(--bg-card);border:1px solid var(--border);transition:all .15s;cursor:pointer;display:block}
+.report-tile:hover{border-color:var(--yellow);background:var(--bg-hover)}
+.report-tile-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.report-tile-name{font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-primary)}
+.report-tile-arrow{color:var(--txt-muted);font-size:14px}
+.report-tile:hover .report-tile-arrow{color:var(--yellow)}
+.report-tile-desc{font-size:12px;color:var(--txt-muted);line-height:1.5}
 </style>
 </head>
 <body>
-
-<header class="header">
-  <div class="header-left">
-    <div class="logo-mark">SF</div>
+<main class="main">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px">
     <div>
-      <div class="company-name">Semper Fi Striping LLC</div>
-      <div class="company-sub">Financial Operations Dashboard</div>
+      <div class="page-title">Overview</div>
+      <div class="page-sub">Financial snapshot of Semper Fi Striping LLC. <span class="timestamp">Last updated: <span id="last-updated">—</span></span></div>
     </div>
   </div>
-  <nav class="header-nav">
-    <a href="index.html" class="nav-link" style="color:var(--yellow);border-bottom:2px solid var(--yellow)">Reports</a>
-    <a href="viewer.html" class="nav-link">Viewer</a>
-    <a href="admin.html" class="nav-link">Admin</a>
-  </nav>
-  <div class="db-status">
-    <div class="status-dot" id="status-dot"></div>
-    <span id="status-label">Connecting…</span>
-  </div>
-</header>
 
-<main class="main" id="main-content">
-  <div class="empty-dash" id="empty-state">
-    Loading data from Firebase…
+  <div id="empty-state" class="empty-state" style="display:none">
+    No data yet. Go to <a href="admin.html">Admin</a> to upload your first report.
+  </div>
+
+  <div id="dashboard-content" style="display:none">
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Performance</span><a href="reports/pl.html">Revenue detail →</a></div>
+    <div class="grid-7030">
+      <div class="panel">
+        <div class="panel-title"><span>Annual Revenue & Net Income</span><a href="reports/pl.html">Detail →</a></div>
+        <div class="chart-wrap h260"><canvas id="chart-pl-trend"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Margins</span><span class="meta">Multi-year</span></div>
+        <div class="chart-wrap h260"><canvas id="chart-margins"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Cash & Working Capital</span><a href="reports/cash.html">Cash detail →</a></div>
+    <div class="grid-6040">
+      <div class="panel">
+        <div class="panel-title"><span>Cash Position Over Time</span><a href="reports/cash.html">Detail →</a></div>
+        <div class="chart-wrap h220"><canvas id="chart-cash"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Latest Balance Sheet</span><span class="meta" id="bs-asof">—</span></div>
+        <div id="bs-summary"></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> Customers, Receivables & Pipeline</span></div>
+    <div class="grid-3">
+      <div class="panel">
+        <div class="panel-title"><span>Customer Concentration</span><a href="reports/customers.html">Detail →</a></div>
+        <div id="concentration-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>AR & Days to Pay</span><a href="reports/customers.html">Detail →</a></div>
+        <div id="ar-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Pipeline (Knowify)</span><a href="reports/pipeline.html">Detail →</a></div>
+        <div id="pipeline-block"></div>
+      </div>
+    </div>
+
+    <div class="section-label"><span><span class="accent">▸</span> All Reports</span></div>
+    <div class="grid-3" style="margin-bottom:24px">
+      <a href="reports/pl.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Revenue & Profit</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Multi-year P&L trend, monthly current-year run rate, margin analysis, OpEx breakdown.</div></a>
+      <a href="reports/cash.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Cash & Balance Sheet</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Cash trajectory, working capital, debt schedule, ratios. Combines BS snapshots and cash flow.</div></a>
+      <a href="reports/customers.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Customers & AR</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Customer concentration, top revenue, days-to-pay distribution, open invoices by customer.</div></a>
+      <a href="reports/vendors.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Vendors & AP</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Vendor aging, top vendors, AP trend over time.</div></a>
+      <a href="reports/pipeline.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Pipeline</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Knowify bid pipeline with the 4 SFS rules applied — competitive vs. relationship, win rate, top GCs, sales lead performance.</div></a>
+      <a href="viewer.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Raw Data Viewer</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Browse every dataset stored in Firebase, full structured tables, drill into any period or snapshot.</div></a>
+    </div>
   </div>
 </main>
 
 <script>
-Chart.defaults.color = '#8a90a0';
-Chart.defaults.borderColor = '#252a38';
-Chart.defaults.font.family = "'JetBrains Mono', monospace";
-Chart.defaults.font.size = 11;
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+injectNavStyles();
+renderNav('overview');
+setupChartTheme();
 
-getDB().ref('.info/connected').on('value', snap => {
-  const ok = snap.val();
-  document.getElementById('status-dot').style.cssText = `background:${ok?'var(--green)':'var(--red)'}`;
-  document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
-});
+let charts = {};
 
-DB.onAll(rawData => {
-  if (!rawData || !Object.keys(rawData).filter(k=>k!=='meta').length) {
-    document.getElementById('empty-state').innerHTML =
-      `No data yet. Go to <a href="admin.html">Admin</a> to upload your first report.`;
+loadDashboard((D, raw) => {
+  if (!D || !raw || Object.keys(raw).filter(k => !k.startsWith('_') && k !== 'meta').length === 0) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('dashboard-content').style.display = 'none';
     return;
   }
-  // Normalize data: extract "latest" from each dataset's storage structure
-  const data = normalizeDashboardData(rawData);
-  renderDashboard(data, rawData);
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('dashboard-content').style.display = 'block';
+
+  const lastUpd = D.meta?.lastUpdated;
+  if (lastUpd) {
+    const d = new Date(lastUpd);
+    document.getElementById('last-updated').textContent = isNaN(d) ? lastUpd : d.toLocaleString();
+  }
+
+  renderKPIs(D);
+  renderPLTrend(D);
+  renderMargins(D);
+  renderCashTrend(D);
+  renderBSSummary(D);
+  renderConcentration(D);
+  renderARBlock(D);
+  renderPipelineBlock(D);
 });
 
-function normalizeDashboardData(raw) {
-  const out = { meta: raw.meta || {} };
-
-  // Period datasets: read latest period
-  ['qbo-pl','qbo-cf'].forEach(id => {
-    const ds = raw[id] || {};
-    if (ds.periods) {
-      const latestKey = ds.latest;
-      out[id] = latestKey ? (ds.periods[latestKey] || {}) : Object.values(ds.periods||{}).sort((a,b)=>(b._periodKey||'')>(a._periodKey||'')?1:-1)[0] || {};
-    } else if (ds.revenue || ds.operatingCF) {
-      out[id] = ds; // legacy flat structure
-    } else {
-      out[id] = {};
-    }
-  });
-
-  // Snapshot dataset: read latest snapshot
-  const bsRaw = raw['qbo-bs'] || {};
-  if (bsRaw.snapshots) {
-    const latestKey = bsRaw.latestDate;
-    out['qbo-bs'] = latestKey ? (bsRaw.snapshots[latestKey] || {}) : Object.values(bsRaw.snapshots||{}).sort((a,b)=>(b._dateKey||'')>(a._dateKey||'')?1:-1)[0] || {};
-  } else if (bsRaw.totalAssets) {
-    out['qbo-bs'] = bsRaw;
-  } else {
-    out['qbo-bs'] = {};
-  }
-
-  // Merge datasets: already flat (mergeSalesData writes directly)
-  out['qbo-sales'] = raw['qbo-sales'] || {};
-  out['qbo-transactions'] = raw['qbo-transactions'] || {};
-  out['knowify-jobs'] = raw['knowify-jobs'] || {};
-
-  return out;
-}
-
-function renderDashboard(D, rawData) {
+function renderKPIs(D) {
   const pl = D['qbo-pl'] || {};
   const bs = D['qbo-bs'] || {};
-  const cf = D['qbo-cf'] || {};
-  const sales = D['qbo-sales'] || {};
-  const kno = D['knowify-jobs'] || {};
-  const meta = D.meta || {};
+  const knowify = D['knowify-jobs'] || {};
+  const oi = D['qbo-open-invoices'] || {};
+  const ar = D['qbo-ar-aging'] || {};
 
-  const main = document.getElementById('main-content');
-  main.innerHTML = '';
+  const latestPLYear = D['qbo-pl_all'] ? Object.keys(D['qbo-pl_all']).sort().reverse()[0] : null;
+  const isYTD = latestPLYear == new Date().getFullYear();
+  const priorYearKey = String(parseInt(latestPLYear || 0) - 1);
+  const priorPL = D['qbo-pl_all']?.[priorYearKey] || {};
 
-  // ── KPI ROW ──────────────────────────────────────────────
-  const totalDebt = (bs.longTermLiab||0) + (bs.creditCards||0);
-  const dso = (bs.ar && pl.revenue) ? Math.round(bs.ar / (pl.revenue / 365)) : null;
   const kpis = [
-    { label:'Revenue', value: pl.revenue ? fmtK(pl.revenue) : '—', color:'--yellow',
-      sub: pl.meta?.period ? pl.meta.period.split('-')[0] : '' },
-    { label:'Gross Margin', value: pl.grossMarginPct ? pl.grossMarginPct.toFixed(1)+'%' : '—', color:'--green',
-      sub: pl.grossProfit ? fmt(pl.grossProfit) : '' },
-    { label:'Net Income', value: pl.netIncome ? fmtK(pl.netIncome) : '—',
-      color: pl.netIncome >= 0 ? '--green' : '--red',
-      sub: pl.netMarginPct ? pl.netMarginPct.toFixed(1)+'% margin' : '' },
-    { label:"Cash", value: bs.cash ? fmtK(bs.cash) : '—', color:'--orange',
-      sub: bs.meta?.period || '' },
-    { label:'Accounts Receivable', value: bs.ar ? fmtK(bs.ar) : '—', color:'--red',
-      sub: dso ? `<span class="warn">${dso} day DSO</span>` : '' },
-    { label:'Working Capital', value: bs.workingCapital ? fmtK(bs.workingCapital) : '—',
-      color: (bs.workingCapital||0) >= 0 ? '--green' : '--red', sub: bs.currentRatio ? bs.currentRatio+'x CR' : '' },
-    { label:'Total LT Debt', value: bs.longTermLiab ? fmtK(bs.longTermLiab) : '—', color:'--red',
-      sub: 'Excl. A/P & cards' },
-    { label:'Knowify Win Rate', value: kno.summary?.winRate ? kno.summary.winRate+'%' : '—',
-      color:'--blue', sub: kno.summary ? kno.summary.biddingJobs+' bids open' : '' },
+    { label: isYTD ? `Revenue YTD ${latestPLYear}` : `Revenue ${latestPLYear || ''}`, value: fmtK(pl.revenue), color: 'yellow', sub: priorPL.revenue ? yoy(pl.revenue, priorPL.revenue) : (isYTD ? 'this year' : 'full year'), href: 'reports/pl.html' },
+    { label: 'Net Income', value: fmtK(pl.netIncome), color: pl.netIncome >= 0 ? 'green' : 'red', sub: pl.netMarginPct != null ? `${pl.netMarginPct.toFixed(1)}% margin` : '', href: 'reports/pl.html' },
+    { label: 'Gross Margin', value: pl.grossMarginPct != null ? `${pl.grossMarginPct.toFixed(1)}%` : '—', color: pl.grossMarginPct >= 30 ? 'green' : pl.grossMarginPct >= 20 ? 'orange' : 'red', sub: pl.grossProfit != null ? fmtK(pl.grossProfit) + ' GP' : '', href: 'reports/pl.html' },
+    { label: 'Cash', value: fmtK(bs.cash), color: bs.cash > 50000 ? 'green' : bs.cash > 0 ? 'orange' : 'red', sub: bs.meta?.period || '—', href: 'reports/cash.html' },
+    { label: 'AR Outstanding', value: fmtK(oi.summary?.totalOpen || ar.summary?.total || bs.ar), color: 'yellow', sub: oi.meta?.invoiceCount ? `${oi.meta.invoiceCount} open` : (bs.ar ? 'BS balance' : ''), href: 'reports/customers.html' },
+    { label: 'Working Capital', value: fmtK(bs.workingCapital), color: bs.workingCapital > 0 ? 'green' : 'red', sub: bs.currentRatio ? `${bs.currentRatio.toFixed(2)}x ratio` : '', href: 'reports/cash.html' },
+    { label: 'Pipeline', value: fmtK(knowify.summary?.pipelineTotal), color: 'blue', sub: knowify.summary?.biddingJobs ? `${knowify.summary.biddingJobs} bidding` : '', href: 'reports/pipeline.html' },
+    { label: 'Total Liabilities', value: fmtK(bs.totalLiabilities), color: 'orange', sub: bs.totalEquity != null && bs.totalEquity !== 0 ? `${(bs.totalLiabilities/Math.abs(bs.totalEquity)).toFixed(2)}x D/E` : '', href: 'reports/cash.html' },
   ];
 
-  const kpiRow = document.createElement('div');
-  kpiRow.className = 'kpi-row';
-  kpis.forEach(k => {
-    kpiRow.innerHTML += `<div class="kpi" style="--kpi-color:var(${k.color})">
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="kpi" style="--kpi-color:var(--${k.color})" onclick="window.location='${k.href}'">
       <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value" style="color:var(${k.color})">${k.value}</div>
-      <div class="kpi-sub">${k.sub}</div>
-    </div>`;
-  });
-  main.appendChild(label('◆','Key Performance Indicators'));
-  main.appendChild(kpiRow);
-
-  // ── REVENUE TREND + YOY ──────────────────────────────────
-  if (sales.monthlyByYear) {
-    main.appendChild(label('◆','Revenue Trend · Monthly'));
-    const revRow = document.createElement('div');
-    revRow.className = 'grid-6040';
-    revRow.innerHTML = `
-      <div class="panel">
-        <div class="panel-title">Monthly Revenue by Year <span class="badge yellow">INVOICED</span></div>
-        <div class="chart-wrap h260"><canvas id="revenueChart"></canvas></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">Year-over-Year</div>
-        <div id="yoy-section"></div>
-        <div style="margin-top:16px" class="chart-wrap h180"><canvas id="annualBarChart"></canvas></div>
-      </div>`;
-    main.appendChild(revRow);
-    setTimeout(() => buildRevenueCharts(sales), 0);
-  }
-
-  // ── P&L + SERVICE MIX ──────────────────────────────────
-  if (pl.revenue) {
-    main.appendChild(label('◆','Profit & Loss · ' + (pl.meta?.period || '')));
-    const plRow = document.createElement('div');
-    plRow.className = 'grid-3col';
-
-    // P&L table
-    const plRows = buildPLRows(pl);
-    // Service chart data
-    const svcData = (sales.topServices || []).slice(0,8);
-    const svcOther = (sales.topServices || []).slice(8).reduce((s,x)=>s+x.amount,0);
-    if (svcOther > 0) svcData.push({ name:'Other', amount: svcOther });
-
-    plRow.innerHTML = `
-      <div class="panel">
-        <div class="panel-title">Income Statement <span class="badge">ACCRUAL</span></div>
-        <div id="pl-table">${plRows}</div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">Revenue by Service <span class="badge yellow">${pl.meta?.period?.split(' ')[0]||''}</span></div>
-        <div class="chart-wrap h200"><canvas id="serviceChart"></canvas></div>
-        <div id="service-legend" style="margin-top:12px"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">OpEx Breakdown <span class="badge">${pl.meta?.period?.split(' ')[0]||''}</span></div>
-        <div class="chart-wrap h200"><canvas id="expenseChart"></canvas></div>
-        <div id="expense-legend" style="margin-top:12px"></div>
-      </div>`;
-    main.appendChild(plRow);
-    setTimeout(() => { buildServiceChart(svcData, pl.revenue); buildExpenseChart(pl); }, 0);
-  }
-
-  // ── CUSTOMERS + BALANCE ──────────────────────────────────
-  main.appendChild(label('◆','Customers & Balance Sheet'));
-  const custBal = document.createElement('div');
-  custBal.className = 'grid-6040';
-  const custRows = buildCustomerRows(sales.topCustomers||[], sales.totalRevenue||0);
-  const bsDetails = buildBSDetails(bs);
-  custBal.innerHTML = `
-    <div class="panel">
-      <div class="panel-title">Top Customers <span class="badge yellow">BY REVENUE</span></div>
-      <div id="customer-table">${custRows}</div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Balance Sheet <span class="badge">${bs.meta?.period||'LATEST'}</span></div>
-      <div class="chart-wrap h180"><canvas id="balanceChart"></canvas></div>
-      ${bsDetails}
-    </div>`;
-  main.appendChild(custBal);
-  setTimeout(() => buildBalanceChart(bs), 0);
-
-  // ── CASH + DEBT + KNOWIFY ──────────────────────────────────
-  main.appendChild(label('◆','Cash · Debt · Pipeline'));
-  const cdRow = document.createElement('div');
-  cdRow.className = 'grid-3';
-  cdRow.innerHTML = `
-    <div class="panel">
-      <div class="panel-title">Working Capital Health</div>
-      ${buildWorkingCapital(bs, pl)}
-    </div>
-    <div class="panel">
-      <div class="panel-title">Debt Schedule <span class="badge red">${bs.longTermLiab ? fmt(bs.longTermLiab) : '—'}</span></div>
-      ${buildDebtTable(bs)}
-    </div>
-    <div class="panel">
-      <div class="panel-title">Cash Flow <span class="badge">${cf.meta?.period||''}</span></div>
-      ${buildCFTable(cf)}
-      <div class="chart-wrap" style="height:110px;margin-top:14px"><canvas id="cfChart"></canvas></div>
-    </div>`;
-  main.appendChild(cdRow);
-  setTimeout(() => buildCFChart(cf), 0);
-
-  // Knowify pipeline
-  if (kno.summary) {
-    main.appendChild(label('◆','Knowify Job Intelligence'));
-    const kRow = document.createElement('div');
-    kRow.className = 'grid-2';
-    kRow.innerHTML = `
-      <div class="panel">
-        <div class="panel-title">Job Summary</div>
-        ${buildKnowifySummary(kno)}
-      </div>
-      <div class="panel">
-        <div class="panel-title">Top Clients (Contract Value)</div>
-        ${buildKnowifyClients(kno)}
-      </div>`;
-    main.appendChild(kRow);
-  }
-
-  const footer = document.createElement('div');
-  footer.style.cssText = 'border-top:1px solid var(--border);padding:16px 0;display:flex;justify-content:space-between;font-size:11px;color:var(--txt-muted);margin-top:8px';
-  footer.innerHTML = `<span>Semper Fi Striping LLC · Financial Dashboard · Sourced from QuickBooks & Knowify</span>
-    <span>Last updated: ${meta.lastUpdated ? new Date(meta.lastUpdated).toLocaleString() : '—'}</span>`;
-  main.appendChild(footer);
-}
-
-function label(accent, text) {
-  const el = document.createElement('div');
-  el.className = 'section-label';
-  el.innerHTML = `<span class="accent">${accent}</span>${text}`;
-  return el;
-}
-
-// ── CHART BUILDERS ─────────────────────────────────────────
-
-function buildRevenueCharts(sales) {
-  const years = Object.keys(sales.monthlyByYear).sort();
-  const colors = { oldest:'#2e3448', mid:'#555c70', current:'#f5c842', ytd:'#3ecf8e' };
-  const sorted = years.slice().sort();
-  const datasets = sorted.map((yr, i) => {
-    const isLatest = i === sorted.length - 1;
-    const isPrev   = i === sorted.length - 2;
-    const data = sales.monthlyByYear[yr].map((v, mi) =>
-      isLatest && v === 0 ? null : v);
-    return {
-      label: yr,
-      data,
-      borderColor: isLatest ? '#f5c842' : isPrev ? '#3ecf8e' : i === sorted.length-3 ? '#555c70' : '#2e3448',
-      backgroundColor: isLatest ? 'rgba(245,200,66,.06)' : isPrev ? 'rgba(62,207,142,.06)' : 'transparent',
-      borderWidth: isLatest ? 2.5 : isPrev ? 2 : 1.5,
-      pointRadius: isLatest ? 3 : 0,
-      fill: isLatest || isPrev,
-      tension: 0.4,
-    };
-  });
-  new Chart(document.getElementById('revenueChart'), {
-    type:'line', data:{ labels:MONTHS, datasets },
-    options:{ responsive:true, maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{ legend:{position:'top',align:'end',labels:{boxWidth:12,boxHeight:2,padding:14}},
-        tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${fmt(c.raw||0)}`}} },
-      scales:{y:{grid:{color:'#1e2330'},ticks:{callback:v=>'$'+fmtK(v)},border:{color:'#252a38'}},
-              x:{grid:{display:false},border:{color:'#252a38'}}} }
-  });
-
-  // Annual bar + YoY
-  const annuals = sales.annualTotals || {};
-  const annYears = Object.keys(annuals).sort();
-  const annVals  = annYears.map(y => annuals[y]);
-  const latest = annYears[annYears.length-1];
-
-  const yoySection = document.getElementById('yoy-section');
-  if (yoySection) {
-    yoySection.innerHTML = `<div class="yoy-grid">${annYears.slice(-5).map((yr,i,arr) => {
-      const chg = i > 0 ? ((annuals[yr] - annuals[arr[i-1]]) / annuals[arr[i-1]] * 100).toFixed(0) : null;
-      return `<div class="yoy-cell">
-        <div class="yoy-label">${yr}</div>
-        <div class="yoy-val" style="color:${yr===latest?'var(--yellow)':'var(--txt-primary)'}">${fmtK(annuals[yr])}</div>
-        ${chg!==null ? `<div class="yoy-change" style="color:${chg>=0?'var(--green)':'var(--red)'}">${chg>=0?'▲':'▼'} ${Math.abs(chg)}%</div>` : ''}
-      </div>`;
-    }).join('')}</div>`;
-  }
-
-  new Chart(document.getElementById('annualBarChart'), {
-    type:'bar', data:{ labels:annYears,
-      datasets:[{ data:annVals, borderRadius:2, borderWidth:1,
-        backgroundColor: annYears.map(y => y===latest ? 'rgba(245,200,66,.8)' : 'rgba(46,52,72,.9)'),
-        borderColor: annYears.map(y => y===latest ? '#f5c842' : '#2e3448') }] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{y:{grid:{color:'#1a1e28'},ticks:{callback:v=>'$'+fmtK(v)},border:{color:'#252a38'}},
-              x:{grid:{display:false},border:{color:'#252a38'}}} }
-  });
-}
-
-function buildServiceChart(services, totalRev) {
-  const colors = ['#f5c842','#e07b2b','#3ecf8e','#4a9eff','#9b6dff','#e05252','#5ecfcf','#8a90a0'];
-  new Chart(document.getElementById('serviceChart'), {
-    type:'doughnut', data:{ labels:services.map(s=>s.name),
-      datasets:[{ data:services.map(s=>s.amount), backgroundColor:colors,
-        borderColor:'#13161e', borderWidth:2, hoverOffset:6 }] },
-    options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
-      plugins:{ legend:{display:false}, tooltip:{callbacks:{
-        label:c=>` ${c.label}: ${fmt(c.raw)} (${fmtPct(c.raw,totalRev)})` }} } }
-  });
-  const leg = document.getElementById('service-legend');
-  if (leg) leg.innerHTML = services.slice(0,7).map((s,i) =>
-    `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-secondary)">
-        <div style="width:8px;height:8px;background:${colors[i]};flex-shrink:0"></div>${s.name}</div>
-      <div style="font-family:var(--font-mono);font-size:11px">${fmt(s.amount)}</div>
+      <div class="kpi-value ${k.color}">${k.value}</div>
+      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
     </div>`).join('');
 }
 
-function buildExpenseChart(pl) {
-  const items = Object.entries(pl.opex||{}).sort((a,b)=>b[1]-a[1]);
-  const top = items.slice(0,7);
-  const otherVal = items.slice(7).reduce((s,[,v])=>s+v,0);
-  const final = [...top, ['Other', otherVal]];
-  const colors = ['#f5c842','#e07b2b','#4a9eff','#e05252','#3ecf8e','#9b6dff','#5ecfcf','#555c70'];
-  new Chart(document.getElementById('expenseChart'), {
-    type:'doughnut', data:{ labels:final.map(([k])=>k),
-      datasets:[{ data:final.map(([,v])=>v), backgroundColor:colors,
-        borderColor:'#13161e', borderWidth:2, hoverOffset:6 }] },
-    options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
-      plugins:{ legend:{display:false}, tooltip:{callbacks:{
-        label:c=>` ${c.label}: ${fmt(c.raw)} (${fmtPct(c.raw,pl.opexTotal)})` }} } }
-  });
-  const leg = document.getElementById('expense-legend');
-  if (leg) leg.innerHTML = final.slice(0,6).map(([k,v],i) =>
-    `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-secondary)">
-        <div style="width:8px;height:8px;background:${colors[i]};flex-shrink:0"></div>${k}</div>
-      <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)">${fmtPct(v,pl.opexTotal)}</div>
-    </div>`).join('');
+function yoy(curr, prior) {
+  if (!prior || prior === 0) return '';
+  const pct = ((curr - prior) / Math.abs(prior) * 100);
+  const cls = pct >= 0 ? 'up' : 'down';
+  const sign = pct >= 0 ? '+' : '';
+  return `<span class="${cls}">${sign}${pct.toFixed(1)}% YoY</span>`;
 }
 
-function buildBalanceChart(bs) {
-  if (!document.getElementById('balanceChart')) return;
-  new Chart(document.getElementById('balanceChart'), {
-    type:'bar',
-    data:{ labels:['Cash','A/R','Other Curr.','Fixed'],
-      datasets:[{ data:[bs.cash,bs.ar,bs.otherCurrentAssets,bs.fixedAssetsNet],
-        backgroundColor:['rgba(62,207,142,.7)','rgba(245,200,66,.7)','rgba(74,158,255,.5)','rgba(155,109,255,.5)'],
-        borderColor:['#3ecf8e','#f5c842','#4a9eff','#9b6dff'], borderWidth:1, borderRadius:2 }] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{y:{grid:{color:'#1a1e28'},ticks:{callback:v=>'$'+fmtK(v)},border:{color:'#252a38'}},
-              x:{grid:{display:false},border:{color:'#252a38'}}} }
+function renderPLTrend(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-pl-trend');
+  if (charts.pl) charts.pl.destroy();
+  charts.pl = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: years, datasets: [
+      { label: 'Revenue', data: years.map(y => all[y].revenue || 0), backgroundColor: CHART_COLORS.yellow + '99', borderColor: CHART_COLORS.yellow, borderWidth: 1, order: 2 },
+      { label: 'Net Income', data: years.map(y => all[y].netIncome || 0), type: 'line', borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green, tension: 0.2, borderWidth: 2, pointRadius: 4, order: 1 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
   });
 }
 
-function buildCFChart(cf) {
-  if (!cf.operatingCF || !document.getElementById('cfChart')) return;
-  const vals = [cf.operatingCF, cf.investingCF, cf.financingCF];
-  new Chart(document.getElementById('cfChart'), {
-    type:'bar',
-    data:{ labels:['Operations','Investing','Financing'],
-      datasets:[{ data:vals, borderRadius:2, borderWidth:1,
-        backgroundColor: vals.map(v => v>=0 ? 'rgba(62,207,142,.7)' : 'rgba(224,82,82,.7)'),
-        borderColor: vals.map(v => v>=0 ? '#3ecf8e' : '#e05252') }] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{y:{grid:{color:'#1a1e28'},ticks:{callback:v=>'$'+fmtK(v),maxTicksLimit:4},border:{color:'#252a38'}},
-              x:{grid:{display:false},border:{color:'#252a38'}}} }
+function renderMargins(D) {
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const ctx = document.getElementById('chart-margins');
+  if (charts.margins) charts.margins.destroy();
+  charts.margins = new Chart(ctx, {
+    type: 'line',
+    data: { labels: years, datasets: [
+      { label: 'Gross Margin %', data: years.map(y => all[y].grossMarginPct), borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
+      { label: 'Net Margin %', data: years.map(y => all[y].netMarginPct), borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => v + '%' } } } },
   });
 }
 
-// ── DATA RENDERERS ──────────────────────────────────────────
-
-function buildPLRows(pl) {
-  const row = (name, val, pctOf, cls, neg) => {
-    const displayVal = neg && val != null ? fmt(-val) : fmt(val);
-    const color = cls.includes('highlight') ? (val>=0?'var(--green)':'var(--red)') :
-                  neg ? 'var(--txt-secondary)' : 'var(--txt-primary)';
-    return `<div class="pl-row ${cls}">
-      <div class="pl-name">${name}</div>
-      <div class="pl-pct">${pctOf ? fmtPct(val,pctOf) : ''}</div>
-      <div class="pl-val" style="color:${color}">${displayVal}</div>
-    </div>`;
-  };
-  const r = pl;
-  return [
-    row('Revenue', r.revenue, null, 'total'),
-    row('Cost of Goods Sold', r.cogsTotal, r.revenue, 'total', true),
-    ...Object.entries(r.cogs||{}).map(([k,v]) => row('  '+k, v, r.revenue, 'sub', true)),
-    row('Gross Profit', r.grossProfit, r.revenue, 'total highlight'),
-    row('Operating Expenses', r.opexTotal, r.revenue, 'total', true),
-    ...Object.entries(r.opex||{}).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v]) => row('  '+k, v, r.revenue, 'sub', true)),
-    row('Net Operating Income', r.netOpIncome, r.revenue, 'total highlight'),
-    r.depreciation != null ? row('  Depreciation', r.depreciation, null, 'sub', true) : '',
-    row('Net Income', r.netIncome, r.revenue, 'total highlight'),
-  ].join('');
+function renderCashTrend(D) {
+  const snaps = D['qbo-bs_all'] || {};
+  const dates = Object.keys(snaps).sort();
+  const ctx = document.getElementById('chart-cash');
+  if (charts.cash) charts.cash.destroy();
+  charts.cash = new Chart(ctx, {
+    type: 'line',
+    data: { labels: dates, datasets: [{
+      label: 'Cash', data: dates.map(d => snaps[d].cash || 0),
+      borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '22',
+      tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } },
+  });
 }
 
-function buildCustomerRows(customers, totalRev) {
-  if (!customers.length) return '<div style="color:var(--txt-muted);font-size:12px;padding:12px 0">No customer data loaded.</div>';
-  const max = customers[0].total;
-  const top = customers.slice(0,12);
-  const topTotal = top.reduce((s,c)=>s+c.total,0);
-  return top.map((c,i) =>
-    `<div class="cust-row">
-      <div class="cust-rank">${String(i+1).padStart(2,'0')}</div>
-      <div>
-        <div class="cust-name">${c.name}</div>
-        <div class="cust-bar-wrap" style="width:100%;margin-top:4px">
-          <div class="cust-bar-fill" style="width:${(c.total/max*100).toFixed(1)}%"></div>
-        </div>
-      </div>
-      <div class="cust-val">${fmt(c.total)}</div>
-      <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);min-width:40px;text-align:right">${fmtPct(c.total,totalRev)}</div>
-    </div>`).join('') +
-    `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-bright);display:flex;justify-content:space-between;font-size:12px;color:var(--txt-muted)">
-      <span>Top 12 total</span>
-      <span style="font-family:var(--font-mono);color:var(--yellow)">${fmt(topTotal)} <span style="color:var(--txt-muted)">(${fmtPct(topTotal,totalRev)})</span></span>
-    </div>`;
+function renderBSSummary(D) {
+  const bs = D['qbo-bs'] || {};
+  document.getElementById('bs-asof').textContent = bs.meta?.period || '—';
+  const rows = [
+    ['Total Assets', bs.totalAssets, ''],
+    ['Cash', bs.cash, 'green'],
+    ['Accounts Receivable', bs.ar, 'yellow'],
+    ['Total Liabilities', bs.totalLiabilities, 'red'],
+    ['Total Equity', bs.totalEquity, bs.totalEquity >= 0 ? 'green' : 'red'],
+    ['Working Capital', bs.workingCapital, bs.workingCapital >= 0 ? 'green' : 'red'],
+  ];
+  document.getElementById('bs-summary').innerHTML = rows.map(([label, val, cls]) =>
+    `<div class="stat-row"><div class="stat-row-label">${label}</div><div class="stat-row-value ${cls}">${fmt(val)}</div></div>`
+  ).join('');
 }
 
-function buildBSDetails(bs) {
-  const r = v => `<div class="stat-row"><div class="stat-row-label">${arguments[2]||''}${arguments[1]}</div><div class="stat-row-value" style="color:${arguments[3]||'var(--txt-primary)'}">${fmt(v)}</div></div>`;
-  return `<div style="margin-top:14px">
-    <div class="stat-row"><div class="stat-row-label"><div class="dot" style="background:var(--green)"></div>Total Assets</div><div class="stat-row-value" style="color:var(--green)">${fmt(bs.totalAssets)}</div></div>
-    <div class="stat-row"><div class="stat-row-label"><div class="dot" style="background:var(--red)"></div>Total Liabilities</div><div class="stat-row-value" style="color:var(--red)">${fmt(bs.totalLiabilities)}</div></div>
-    <div class="stat-row"><div class="stat-row-label"><div class="dot" style="background:var(--blue)"></div>Total Equity</div><div class="stat-row-value" style="color:${(bs.totalEquity||0)>=0?'var(--blue)':'var(--red)'}">${fmt(bs.totalEquity)}</div></div>
-    <div class="stat-row"><div class="stat-row-label"><div class="dot" style="background:var(--yellow)"></div>A/R Outstanding</div><div class="stat-row-value" style="color:var(--yellow)">${fmt(bs.ar)}</div></div>
-  </div>`;
+function renderConcentration(D) {
+  const sales = D['qbo-sales'] || {};
+  const conc = customerConcentration(sales.topCustomers, sales.totalRevenue, 5);
+  const el = document.getElementById('concentration-block');
+  if (!conc) { el.innerHTML = '<div class="empty-state">No sales data yet.</div>'; return; }
+  const concColor = conc.pctOfTotal > 60 ? 'red' : conc.pctOfTotal > 40 ? 'orange' : 'green';
+  const customerHtml = conc.customers.map(c =>
+    `<div class="stat-row"><div class="stat-row-label">${c.name}</div><div class="stat-row-value">${fmtK(c.revenue)} <span style="color:var(--txt-muted)">${c.pct}%</span></div></div>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--${concColor})">${conc.pctOfTotal}%</div>
+      <div style="color:var(--txt-muted);font-size:11px">Top 5 of ${fmtK(sales.totalRevenue)} lifetime</div>
+    </div>
+    ${customerHtml}`;
 }
 
-function buildWorkingCapital(bs, pl) {
-  const wc = bs.workingCapital;
-  const cr = bs.currentRatio;
-  const dso = (bs.ar && pl.revenue) ? Math.round(bs.ar/(pl.revenue/365)) : null;
-  const mb = (label, note, val, color) =>
-    `<div class="metric-block"><div><div class="metric-label">${label}</div><div class="metric-note">${note}</div></div><div class="metric-val" style="color:${color}">${val}</div></div>`;
-  return [
-    mb('Working Capital','Current Assets − Current Liabilities', fmt(wc), (wc||0)>=0?'var(--green)':'var(--red)'),
-    mb('Current Ratio','CA / CL (healthy = >1.5x)', (cr||'—')+'x', (cr||0)>=1.5?'var(--green)':(cr||0)>=1?'var(--orange)':'var(--red)'),
-    dso ? mb('Days Sales Outstanding','A/R ÷ (Annual Rev / 365)', dso+' days', dso<=45?'var(--green)':dso<=60?'var(--orange)':'var(--red)') : '',
-    mb('Cash on Hand','Bank checking balance', fmt(bs.cash), 'var(--orange)'),
-  ].join('');
+function renderARBlock(D) {
+  const oi = D['qbo-open-invoices'] || {};
+  const ar = D['qbo-ar-aging'] || {};
+  const el = document.getElementById('ar-block');
+  const totalOpen = oi.summary?.totalOpen ?? ar.summary?.total ?? null;
+  if (totalOpen == null) { el.innerHTML = '<div class="empty-state">No open AR data yet.</div>'; return; }
+  const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
+  const html = [`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--yellow)">${fmt(totalOpen)}</div>
+      <div style="color:var(--txt-muted);font-size:11px">${oi.meta?.invoiceCount || ar.meta?.customerCount || 0} ${oi.meta?.invoiceCount ? 'invoices' : 'customers'}</div>
+    </div>`];
+  if (stats) {
+    html.push(`<div class="stat-row"><div class="stat-row-label">Avg days to pay</div><div class="stat-row-value">${stats.avgDays}d</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">Median</div><div class="stat-row-value">${stats.medianDays}d</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">90th percentile</div><div class="stat-row-value">${stats.p90Days}d</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">Oldest</div><div class="stat-row-value">${stats.maxDays}d</div></div>`);
+  } else if (ar.summary) {
+    html.push(`<div class="stat-row"><div class="stat-row-label">Current</div><div class="stat-row-value">${fmt(ar.summary.current)}</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">1 – 30</div><div class="stat-row-value">${fmt(ar.summary.days1_30)}</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">31 – 60</div><div class="stat-row-value">${fmt(ar.summary.days31_60)}</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">61 – 90</div><div class="stat-row-value">${fmt(ar.summary.days61_90)}</div></div>`);
+    html.push(`<div class="stat-row"><div class="stat-row-label">91+</div><div class="stat-row-value">${fmt(ar.summary.days91_plus)}</div></div>`);
+  }
+  el.innerHTML = html.join('');
 }
 
-function buildDebtTable(bs) {
-  const debts = bs.ltDebts || [];
-  if (!debts.length) return '<div style="color:var(--txt-muted);font-size:12px;padding:12px 0">No debt data loaded.</div>';
-  const typeColors = { TERM:'#e05252', VEHICLE:'#4a9eff', LOC:'#f5c842', EQUIP:'#9b6dff' };
-  const guessType = name => name.toLowerCase().includes('truck')||name.toLowerCase().includes('vehicle')||name.toLowerCase().includes('f250')?'VEHICLE':
-    name.toLowerCase().includes('forklift')||name.toLowerCase().includes('toyota')?'EQUIP':
-    name.toLowerCase().includes('loc')||name.toLowerCase().includes('line')?'LOC':'TERM';
-  return debts.sort((a,b)=>b.amount-a.amount).map(d => {
-    const t = guessType(d.name);
-    return `<div class="debt-row">
-      <div class="debt-name">${d.name}</div>
-      <div class="debt-type" style="color:${typeColors[t]||'var(--txt-muted)'};border-color:${typeColors[t]||'var(--border-bright)'}">${t}</div>
-      <div class="debt-val">${fmt(d.amount)}</div>
-    </div>`;
-  }).join('') + `<div class="debt-row" style="border-top:2px solid var(--border-bright);margin-top:4px;padding-top:10px">
-    <div class="debt-name" style="font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--txt-primary)">TOTAL</div>
-    <div></div>
-    <div class="debt-val" style="color:var(--red);font-size:14px">${fmt(debts.reduce((s,d)=>s+d.amount,0))}</div>
-  </div>`;
-}
-
-function buildCFTable(cf) {
-  if (!cf.operatingCF) return '<div style="color:var(--txt-muted);font-size:12px;padding:12px 0">No cash flow data loaded.</div>';
-  const row = (label, val, cls) =>
-    `<div class="stat-row"><span style="font-size:12px;color:${cls?'var(--txt-secondary)':'var(--txt-muted)'}">${label}</span>
-     <span style="font-family:var(--font-mono);font-size:13px;color:${val>0?'var(--green)':val<0?'var(--red)':'var(--txt-primary)'}">${fmt(val)}</span></div>`;
-  return [
-    row('Operating CF', cf.operatingCF, true),
-    row('Investing CF', cf.investingCF),
-    row('Financing CF', cf.financingCF),
-    row('Net Change', cf.netCashChange, true),
-    row('Beginning Cash', cf.beginCash),
-    row('Ending Cash', cf.endCash, true),
-  ].join('');
-}
-
-function buildKnowifySummary(kno) {
-  const s = kno.summary;
-  const mb = (label, val, color='var(--txt-primary)') =>
-    `<div class="metric-block"><div class="metric-label">${label}</div><div class="metric-val" style="color:${color}">${val}</div></div>`;
-  return [
-    mb('Active Jobs', s.activeJobs, 'var(--green)'),
-    mb('Pipeline (Bidding)', fmt(s.pipelineTotal), 'var(--yellow)'),
-    mb('Won Contract Value (All)', fmt(s.totalWonCV), 'var(--green)'),
-    mb('Avg Contract Size', fmt(s.avgContract)),
-    mb('Competitive Win Rate', s.winRate+'%', s.winRate>=20?'var(--green)':'var(--orange)'),
-    mb('Total Invoiced', fmt(s.totalInvoiced)),
-  ].join('');
-}
-
-function buildKnowifyClients(kno) {
-  const clients = kno.topClients || [];
-  if (!clients.length) return '';
-  const max = clients[0].total;
-  return clients.slice(0,10).map((c,i) =>
-    `<div class="cust-row">
-      <div class="cust-rank">${String(i+1).padStart(2,'0')}</div>
-      <div>
-        <div class="cust-name">${c.name}</div>
-        <div class="cust-bar-wrap" style="width:100%;margin-top:4px">
-          <div class="cust-bar-fill" style="width:${(c.total/max*100).toFixed(1)}%"></div>
-        </div>
-      </div>
-      <div class="cust-val">${fmt(c.total)}</div>
-      <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);min-width:40px;text-align:right">${c.count} jobs</div>
-    </div>`).join('');
+function renderPipelineBlock(D) {
+  const knowify = D['knowify-jobs'] || {};
+  const el = document.getElementById('pipeline-block');
+  if (!knowify.jobs) { el.innerHTML = '<div class="empty-state">No Knowify data yet.</div>'; return; }
+  const result = applyKnowifyRules(knowify.jobs);
+  const c = result.competitive;
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--blue)">${c.winRate || '—'}%</div>
+      <div style="color:var(--txt-muted);font-size:11px">competitive win rate</div>
+    </div>
+    <div class="stat-row"><div class="stat-row-label">Wins</div><div class="stat-row-value green">${c.wins}</div></div>
+    <div class="stat-row"><div class="stat-row-label">Losses</div><div class="stat-row-value red">${c.losses}</div></div>
+    <div class="stat-row"><div class="stat-row-label">Pending bids</div><div class="stat-row-value">${c.pending}</div></div>
+    <div class="stat-row"><div class="stat-row-label">Pending value</div><div class="stat-row-value yellow">${fmtK(c.pendingCV)}</div></div>
+    <div class="stat-row"><div class="stat-row-label">Reclassified stale</div><div class="stat-row-value muted">${c.reclassifiedStale}</div></div>`;
 }
 </script>
 </body>
 </html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
