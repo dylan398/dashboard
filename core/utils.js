@@ -29,10 +29,13 @@ function parseQBORows(csvText) {
   let meta = {};
 
   for (let i = 0; i < lines.length; i++) {
-    // Parse meta from top 3 rows
-    if (i === 0) { meta.reportType = lines[i].split(',')[0].trim(); continue; }
-    if (i === 1) { meta.company = lines[i].split(',')[0].trim(); continue; }
-    if (i === 2) { meta.period = lines[i].split(',')[0].replace(/^"|"$/g,'').trim(); continue; }
+    // Parse meta from top 3 rows. Use splitCSVRow (which is quote-aware) so
+    // commas inside quoted fields like "January 1-December 31, 2020" don't
+    // break the column split — without this, the year is lost and downstream
+    // getPeriodKey() falls back to the current year, misfiling the record.
+    if (i === 0) { meta.reportType = (splitCSVRow(lines[i])[0]||'').replace(/^"|"$/g,'').trim(); continue; }
+    if (i === 1) { meta.company    = (splitCSVRow(lines[i])[0]||'').replace(/^"|"$/g,'').trim(); continue; }
+    if (i === 2) { meta.period     = (splitCSVRow(lines[i])[0]||'').replace(/^"|"$/g,'').trim(); continue; }
     if (i <= 4) continue; // skip blank + header row
 
     // Parse CSV row (simple: split on comma, handle quoted fields)
