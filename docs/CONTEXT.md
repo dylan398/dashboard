@@ -254,7 +254,39 @@ exist (QuickBooks account didn't exist that day).
 
 
 8. The Dashboard's Architectural Rules
-To avoid drift across future Claude chats:
+8.0 The Actionability Rule (most important)
+Every auto-generated insight, alarm, and recommendation must be about
+something Dylan can actually do. The dashboard exists to inform
+decisions, not to narrate observations.
+What SFS controls (lever you can pull):
+
+Pricing — bid markups, contract terms (informally)
+Cost discipline — OpEx categories, vendor selection
+Crew/capacity — hiring, training, equipment investment
+Service mix — which kinds of work to lean into
+Bid response — speed, quality of bid prep (volume is fixed: SFS bids every job they can)
+
+What SFS does NOT control (don't generate "do X" insights here):
+
+When customers pay — TX subs have no enforceable deadline. AR
+aging, DSO trends, "slow payer" callouts are informational only.
+Reports can show them descriptively but should not frame them as
+to-dos. Dylan: "We can't control when ARs get paid, so focusing on
+that will do nothing."
+Which GCs win primes — SFS bids every job they can. "Pursue this
+GC" recommendations are useless. Dylan: "We will be doing every bid
+we can already." GC win-rate breakdowns are diagnostic (predicting
+cash and capacity), not prescriptive (don't say "focus on GC X").
+Customer relationships at scale — same logic. Customer-by-customer
+views are descriptive context, not action items.
+Cash flow short-term — SBA loan is in progress. Don't harp on
+cash burn or runway. Show debt schedule and equity trajectory; let
+the upcoming loan show up in the financial statements when it lands.
+
+Test: before adding an insight, ask "what would Dylan do with this?"
+If the answer is "nothing — just be aware," it's a descriptive metric,
+not an insight. Put it in a report panel, not in generateInsights().
+8.1 Standing rules
 
 One source of truth per concept. Knowify rules in
 applyKnowifyRules(). Customer concentration in customerConcentration().
