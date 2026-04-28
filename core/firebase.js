@@ -30,6 +30,9 @@ function safeKey(str) {
 //   "Marketing Budget($3,500/mo)" — as object keys for opex/cogs maps.
 function sanitize(obj) {
   if (obj === undefined) return null;
+  // Firebase rejects NaN and Infinity — coerce to null defensively so a single
+  // bad arithmetic in a parser can't fail the whole write.
+  if (typeof obj === 'number' && !isFinite(obj)) return null;
   if (obj === null || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(sanitize);
   const out = {};
