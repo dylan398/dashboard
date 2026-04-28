@@ -1,11 +1,11 @@
 const PARSER_OPEN_INVOICES = {
   id: 'qbo-open-invoices',
   label: 'QuickBooks — Open Invoices',
-  fileType: 'xlsx',
-  accept: '.xlsx',
-  hint: 'Export: Reports → Open Invoices → Export to Excel',
+  fileType: 'csv',
+  accept: '.csv,.xlsx',                      // QBO exports either; we handle both
+  hint: 'Export: Reports → Open Invoices → Export to CSV (or Excel)',
   storageStrategy: 'snapshot',
-  // No expectedReportType — XLSX has no header row to sniff. validate() catches wrong files.
+  expectedReportType: /open\s*invoices?/i,    // matches CSV header row 0; ignored for XLSX
 
   getPeriodKey(data) {
     // "As of Apr 22, 2026" → "2026-04-22"
@@ -29,13 +29,25 @@ const PARSER_OPEN_INVOICES = {
     return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   },
 
-  async parse(file) {
-    const ab = await file.arrayBuffer();
-    const wb = XLSX.read(ab, { type: 'array', cellDates: false });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  // Detect file type by name + binary signature so admin can accept both
+  // CSV and XLSX in the same drop zone without forcing the user to pick.
+  async _readRows(file) {
+    const name = (file.name || '').toLowerCase();
+    if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array', cellDates: false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    }
+    // CSV path: split lines, then split each via splitCSVRow (quote-aware)
+    const text = await file.text();
+    return text.split(/\r?\n/).map(line => splitCSVRow(line).map(c => c.replace(/^"|"$/g, '')));
+  },
 
+  async parse(file) {
+    const rows = await this._readRows(file);
     if (rows.length < 6) throw new Error('Open Invoices file is too short to be valid.');
+
     const reportType = String(rows[0][0] || '').trim();
     const period     = String(rows[2][0] || '').trim();   // "As of <date>"
 
@@ -53,7 +65,7 @@ const PARSER_OPEN_INVOICES = {
     const byCustomer = {};
 
     for (let r = 5; r < rows.length; r++) {
-      const cols = rows[r];
+      const cols = rows[r] || [];
       const c0 = String(cols[0] || '').trim();
 
       // Customer header row: name in col 0, nothing in col 1
@@ -176,17 +188,4 @@ const PARSER_OPEN_INVOICES = {
             <tr class="total"><td>Total Open</td><td>${fmt(total)}</td><td>100%</td></tr>
           </table>
           <div class="preview-kpis">
-            <div class="pkpi"><span class="pkpi-label">Past Due %</span><span class="pkpi-val ${d.summary.pastDuePct > 50 ? 'red' : d.summary.pastDuePct > 30 ? 'orange' : 'green'}">${d.summary.pastDuePct}%</span></div>
-            <div class="pkpi"><span class="pkpi-label">Oldest</span><span class="pkpi-val ${d.summary.oldest > 90 ? 'red' : d.summary.oldest > 30 ? 'orange' : 'green'}">${d.summary.oldest}d</span></div>
-          </div>
-        </div>
-        <div>
-          <div class="preview-sub-title">Top 15 customers by AR</div>
-          <table class="preview-table">
-            <tr><th>#</th><th>Customer</th><th>Open</th><th>Detail</th></tr>
-            ${custRows}
-          </table>
-        </div>
-      </div>`;
-  }
-};
+            <div class="pkpi"><span class="pkpi-label">Past Due %</span><span class="pkpi-val ${d.summary.pas
