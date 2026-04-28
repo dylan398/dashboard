@@ -368,7 +368,50 @@ function applyKnowifyRules(rawJobs, opts = {}) {
  
  
 // ════════════════════════════════════════════════════════════════════════
-// SECTION 3 ─ CORE DERIVED METRICS
+// SECTION 3 ─ INDUSTRY BANDS (calibrated from docs/CONTEXT.md §4)
+// ════════════════════════════════════════════════════════════════════════
+//
+// These are the apples-to-apples industry norms for a sub-$50M-revenue
+// commercial construction subcontractor in TX. Reports must use these
+// instead of generic "60% concentration = bad" guesses.
+//
+// Updating: when CONTEXT.md §4 changes, mirror the change here.
+ 
+const BANDS = {
+  // Customer concentration (top-N as % of total revenue). SBA flags >40%.
+  concentration: { healthy: 30, watch: 40, risk: 60 },
+ 
+  // P&L margins
+  grossMargin:  { weak: 25, healthy: 35, strong: 50 },
+  netMargin:    { weak:  3, healthy:  6, strong: 12 },
+ 
+  // DSO — Days Sales Outstanding. Construction industry runs 60-90 days
+  // normal. SFS at 50-80 is healthy, 80-100 means a slow GC is dragging,
+  // 100+ across the book is a real issue.
+  dso:          { healthy: 80, watch: 100, slow: 120 },
+ 
+  // DPO mirrored
+  dpo:          { healthy: 30, watch: 60 },
+ 
+  // Working capital cycle (DSO − DPO). 20-50 days normal.
+  wcCycle:      { healthy: 50, watch: 70 },
+ 
+  // Liquidity ratios
+  currentRatio: { weak: 1.0, healthy: 1.5, strong: 2.0 },
+  debtToEquity: { strong: 1.0, healthy: 2.0, weak: 3.0 },
+ 
+  // SBA DSCR — minimum 1.15x, lenders prefer 1.25x+
+  dscr:         { sba: 1.15, lender: 1.25, strong: 1.5 },
+ 
+  // Knowify pipeline — competitive win rate. Construction sub bid-win
+  // rates are generally 10-30% on truly competitive bids; higher than
+  // 30% often indicates the relationship-channel filter isn't working.
+  winRate:      { weak: 8, healthy: 15, strong: 25 },
+};
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════
+// SECTION 3b ─ CORE DERIVED METRICS
 // ════════════════════════════════════════════════════════════════════════
  
 /**
@@ -715,6 +758,176 @@ function opexTrend(D) {
  
  
 // ════════════════════════════════════════════════════════════════════════
+// SECTION 4b ─ OPERATIONAL METRICS (most-actionable for SFS)
+// ════════════════════════════════════════════════════════════════════════
+//
+// These are the metrics Dylan actually runs the business on. Per the
+// CONTEXT.md note, "past due" is a misnomer (TX subs have no enforceable
+// deadline), so we frame everything as days-to-pay and customer payment
+// behavior, not collections crises.
+ 
+/**
+ * Per-customer payment-behavior summary from currently-open invoices.
+ * For each customer with open AR, compute their average days-out across
+ * their open invoices, plus their slowest one. This is the "which
+ * customers actually pay on time vs which drag" leaderboard.
+ *
+ * Output rows: { name, openCount, totalOpen, avgDaysOut, oldestDaysOut,
+ *                hasInvoiceOver90, hasInvoiceOver120 }
+ *
+ * Sort: by avgDaysOut descending (slowest payers first) — that's the
+ * leaderboard SFS needs to see when prioritizing collection calls or
+ * deciding which GCs to require deposits from.
+ */
+function customerPaymentPatterns(D) {
+  const oi = D?.['qbo-open-invoices'];
+  if (!oi?.invoices?.length) return null;
+ 
+  const byCustomer = {};
+  for (const inv of oi.invoices) {
+    const c = inv.customer || '— Unknown —';
+    if (!byCustomer[c]) byCustomer[c] = {
+      name: c, openCount: 0, totalOpen: 0,
+      daysSum: 0, daysCount: 0, oldestDaysOut: 0,
+      hasInvoiceOver90: false, hasInvoiceOver120: false,
+    };
+    const row = byCustomer[c];
+    row.openCount++;
+    row.totalOpen += inv.openBalance || 0;
+    const d = inv.daysPastDue;
+    if (typeof d === 'number' && d >= 0 && isFinite(d)) {
+      row.daysSum += d;
+      row.daysCount++;
+      if (d > row.oldestDaysOut) row.oldestDaysOut = d;
+      if (d > 90)  row.hasInvoiceOver90  = true;
+      if (d > 120) row.hasInvoiceOver120 = true;
+    }
+  }
+  const rows = Object.values(byCustomer).map(r => ({
+    name: r.name,
+    openCount: r.openCount,
+    totalOpen: +r.totalOpen.toFixed(2),
+    avgDaysOut: r.daysCount ? +(r.daysSum / r.daysCount).toFixed(1) : null,
+    oldestDaysOut: r.oldestDaysOut,
+    hasInvoiceOver90: r.hasInvoiceOver90,
+    hasInvoiceOver120: r.hasInvoiceOver120,
+  }));
+  rows.sort((a, b) => (b.avgDaysOut || 0) - (a.avgDaysOut || 0));
+  return rows;
+}
+ 
+/**
+ * Seasonal calibration — comparing each month of the current year against
+ * the same month from the prior full year. Returns null if we don't have
+ * enough monthly history.
+ *
+ * Sources:
+ *   • qbo-pl-monthly (current year per-line monthly)
+ *   • qbo-sales.monthlyByYear (historical per-month revenue from Sales by
+ *     Customer Detail). Note this is sales-by-customer revenue, which
+ *     understates P&L revenue by 5-25% (uncategorized income, deposits).
+ *     For YoY-shape comparison the gap is OK; for absolute $ comparison
+ *     it's a caveat.
+ *
+ * Output: { currentYear, priorYear, months: [{name, currentRev, priorRev,
+ *           yoyPct, ytdSamePeriodCY, ytdSamePeriodPY, ytdYoyPct}, …] }
+ */
+function seasonalRevenueCompare(D) {
+  const monthly = D?.['qbo-pl-monthly'];
+  const monthlyByYear = D?.['qbo-sales']?.monthlyByYear;
+  if (!monthly?.revenue?.months || !monthly.meta?.year || !monthlyByYear) return null;
+ 
+  const currentYear = monthly.meta.year;
+  const priorYear   = String(parseInt(currentYear, 10) - 1);
+  const priorRow    = monthlyByYear[priorYear];
+  if (!priorRow) return null;
+ 
+  const cyRev = monthly.revenue.months;       // length = months in YTD export
+  const monthHeaders = monthly.meta.monthHeaders || [];
+ 
+  let cyYTD = 0, pyYTD = 0;
+  const months = cyRev.map((cy, i) => {
+    const py = priorRow[i] || 0;
+    cyYTD += cy || 0;
+    pyYTD += py || 0;
+    return {
+      name: monthHeaders[i] || `M${i+1}`,
+      currentRev: cy || 0,
+      priorRev: py,
+      yoyPct: py > 0 ? +(((cy - py) / py) * 100).toFixed(1) : null,
+      ytdSamePeriodCY: cyYTD,
+      ytdSamePeriodPY: pyYTD,
+      ytdYoyPct: pyYTD > 0 ? +(((cyYTD - pyYTD) / pyYTD) * 100).toFixed(1) : null,
+    };
+  });
+  return { currentYear, priorYear, months };
+}
+ 
+/**
+ * Cost productivity — for each OpEx category, how much revenue does
+ * each dollar of spend produce, and is it trending up (productive) or
+ * down (creeping cost)? This is the "is this spend earning its keep"
+ * lens for OpEx review.
+ *
+ * Output: array of { category, latestPctOfRevenue, priorPctOfRevenue,
+ *                    deltaPct, isCreeping, materiality }
+ */
+function costProductivity(D) {
+  const all = D?.['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  if (years.length < 2) return null;
+  const cy = years[years.length - 1], py = years[years.length - 2];
+  const latest = all[cy], prior = all[py];
+  if (!latest?.opex || !prior?.opex || !latest.revenue || !prior.revenue) return null;
+ 
+  const findings = [];
+  for (const [cat, amt] of Object.entries(latest.opex)) {
+    const priorAmt = prior.opex[cat] || prior.opex[cat.replace(/_/g, ' ')] || 0;
+    const latestPct = +(amt / latest.revenue * 100).toFixed(2);
+    const priorPct  = priorAmt > 0 ? +(priorAmt / prior.revenue * 100).toFixed(2) : null;
+    findings.push({
+      category: cat,
+      latestAmt: amt,
+      priorAmt,
+      latestPctOfRevenue: latestPct,
+      priorPctOfRevenue: priorPct,
+      deltaPct: priorPct != null ? +(latestPct - priorPct).toFixed(2) : null,
+      isCreeping: priorPct != null && latestPct > priorPct + 0.5 && latestPct >= 1,
+      isShrinking: priorPct != null && latestPct < priorPct - 0.5,
+      materiality: latestPct,   // bigger = more important to review
+    });
+  }
+  findings.sort((a, b) => b.materiality - a.materiality);
+  return { yearLatest: cy, yearPrior: py, findings };
+}
+ 
+/**
+ * Pipeline velocity — for closed (Active+Closed) jobs in Knowify, how
+ * many days from creation to award. Approximates "decision time" so SFS
+ * can plan capacity.
+ *
+ * Note: this only works on jobs that DO have outcomes (won), and
+ * approximates "time to award" as creation→today (since Knowify doesn't
+ * record award date separately). Useful as a leading-edge view of how
+ * fast the GC market is moving.
+ *
+ * Output: { medianDays, p25, p75, sample }
+ */
+function pipelineVelocity(D) {
+  const knowify = D?.['knowify-jobs'];
+  if (!knowify?.jobs) return null;
+  const r = applyKnowifyRules(knowify.jobs);
+  const wonJobs = r.competitive.jobs.filter(j => j.outcome === 'win' && j.ageDays != null && j.ageDays >= 0);
+  if (wonJobs.length === 0) return null;
+  const ages = wonJobs.map(j => j.ageDays).sort((a, b) => a - b);
+  const median = ages[Math.floor(ages.length / 2)];
+  const p25 = ages[Math.floor(ages.length * 0.25)];
+  const p75 = ages[Math.floor(ages.length * 0.75)];
+  return { medianDays: median, p25, p75, sample: ages.length };
+}
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════
 // SECTION 5 ─ AUTO-INSIGHTS
 // ════════════════════════════════════════════════════════════════════════
 //
@@ -723,180 +936,188 @@ function opexTrend(D) {
 // report page. Each insight has:
 //   { id, category, severity, title, message, value, recommendation }
  
+// IMPORTANT FOR FUTURE CHATS:
+// SFS controls *internal levers*: pricing/margin, OpEx, crew/capacity,
+// service mix, hiring. They do NOT control: when GCs pay, which GCs win
+// primes (since SFS bids every job they can), customer relationships at
+// scale. Auto-insights must focus on what Dylan can act on.
+//
+// Don't generate AR-collection alarms (Dylan: "We can't control when ARs
+// get paid, so focusing on that will do nothing"). Don't generate
+// per-customer or per-GC pursuit recommendations (Dylan: "We will be
+// doing every bid we can already. We're not picky about what bids we
+// do"). Customer/GC data belongs in descriptive views, not insights.
 function generateInsights(D) {
   const out = [];
  
-  // ── Revenue & profit trajectory ──────────────────────────────────
-  const growth = revenueGrowth(D);
-  const latestGrowth = growth[growth.length - 1];
-  if (latestGrowth?.yoyPct != null) {
-    if (latestGrowth.yoyPct >= 50) {
+  // ── 1. Net margin (pricing/cost discipline — internal lever) ─────
+  const pl = _latestAnnualPL(D);
+  if (pl?.netMarginPct != null) {
+    const m = pl.netMarginPct;
+    if (m < BANDS.netMargin.weak) {
       out.push({
-        id: 'rev-growth-high', category: 'performance', severity: 'positive',
-        title: `Revenue ${latestGrowth.yoyPct >= 100 ? 'doubled' : 'jumped sharply'}`,
-        message: `${latestGrowth.year} revenue is ${latestGrowth.yoyPct}% above ${growth[growth.length - 2]?.year}.`,
-        value: `${latestGrowth.yoyPct}%`,
-        recommendation: 'Confirm capacity (crews, equipment, working capital) is keeping up. Rapid revenue growth without margin discipline is the #1 cause of small-business failure.',
+        id: 'net-margin-weak', category: 'margin', severity: 'warning',
+        title: `Net margin ${m.toFixed(1)}% — below industry median`,
+        message: `Construction-subcontractor peers run 5-10% net median; top decile >20%. Last full year landed at ${m.toFixed(1)}%.`,
+        value: `${m.toFixed(1)}%`,
+        recommendation: 'Two internal levers: bid pricing discipline (industry standard add is 30-40% over cost) and OpEx ratio review (see cost productivity below).',
       });
-    } else if (latestGrowth.yoyPct < 0) {
+    } else if (m >= BANDS.netMargin.strong) {
       out.push({
-        id: 'rev-decline', category: 'performance', severity: 'warning',
-        title: 'Revenue declined year over year',
-        message: `${latestGrowth.year} is ${Math.abs(latestGrowth.yoyPct)}% below ${growth[growth.length - 2]?.year}.`,
-        value: `${latestGrowth.yoyPct}%`,
-        recommendation: 'Check whether this is YTD-vs-full-year (apples to apples requires a full year on both sides).',
-      });
-    }
-  }
- 
-  // ── Margin erosion ────────────────────────────────────────────────
-  const erosion = marginErosion(D);
-  if (erosion && erosion.findings.length) {
-    const top = erosion.findings.slice(0, 3);
-    out.push({
-      id: 'margin-erosion', category: 'cost', severity: top[0].relGrowth > 50 ? 'warning' : 'info',
-      title: 'Cost categories growing faster than revenue',
-      message: `${top.length} category${top.length > 1 ? 'ies are' : ' is'} eating into margin: ` +
-        top.map(f => `${f.category} (${f.priorPct}%→${f.latestPct}% of revenue)`).join(', ') + '.',
-      value: top[0].category,
-      recommendation: 'Look at each category — is the spend producing equivalent value? If not, time to renegotiate or trim.',
-    });
-  }
- 
-  // ── Customer concentration ────────────────────────────────────────
-  const sales = D['qbo-sales'] || {};
-  const conc = customerConcentration(sales.topCustomers, sales.totalRevenue, 5);
-  if (conc) {
-    if (conc.pctOfTotal > 60) {
-      out.push({
-        id: 'concentration-high', category: 'risk', severity: 'warning',
-        title: 'High customer concentration',
-        message: `Top 5 customers represent ${conc.pctOfTotal}% of lifetime revenue. SBA lenders flag anything over 40%.`,
-        value: `${conc.pctOfTotal}%`,
-        recommendation: 'Diversify the customer book before applying for credit. Explicitly name your top 3 in any loan narrative.',
-      });
-    } else if (conc.pctOfTotal < 30) {
-      out.push({
-        id: 'concentration-low', category: 'risk', severity: 'positive',
-        title: 'Healthy customer diversification',
-        message: `Top 5 customers are ${conc.pctOfTotal}% of revenue — well diversified.`,
-        value: `${conc.pctOfTotal}%`,
-        recommendation: 'Strong position for credit applications and negotiations.',
+        id: 'net-margin-strong', category: 'margin', severity: 'positive',
+        title: `Net margin ${m.toFixed(1)}% — top-quartile`,
+        message: `Construction-sub peers median 5-10%. SFS at ${m.toFixed(1)}% is top-quartile.`,
+        value: `${m.toFixed(1)}%`, recommendation: '',
       });
     }
   }
  
-  // ── Days-to-pay ───────────────────────────────────────────────────
-  const oi = D['qbo-open-invoices'];
-  const dtp = oi?.invoices ? daysToPayStats(oi.invoices) : null;
-  if (dtp) {
-    const slow = oi.customers?.filter(c => c.oldestDays > 90).slice(0, 3) || [];
-    if (slow.length) {
+  // ── 2. Gross margin trajectory (pricing power signal) ────────────
+  // Multi-year GM trend tells whether SFS is holding pricing or eroding.
+  const all = D['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  if (years.length >= 3) {
+    const recent = years.slice(-3).map(y => all[y].grossMarginPct).filter(v => v != null);
+    if (recent.length >= 3) {
+      const drop = recent[0] - recent[recent.length - 1];
+      if (drop > 5) {
+        out.push({
+          id: 'gm-erosion', category: 'margin', severity: 'warning',
+          title: `Gross margin compressed ${drop.toFixed(1)}pp over 3 years`,
+          message: `${years[years.length-3]}: ${recent[0]}% → ${years[years.length-1]}: ${recent[recent.length-1]}%. Either bid prices haven't kept up with COGS, or the job mix has shifted toward lower-margin work.`,
+          value: `-${drop.toFixed(1)}pp`,
+          recommendation: 'Worth a bid-pricing audit on the next 5-10 jobs: what % was added over estimated cost?',
+        });
+      } else if (drop < -5) {
+        out.push({
+          id: 'gm-expansion', category: 'margin', severity: 'positive',
+          title: `Gross margin expanded ${Math.abs(drop).toFixed(1)}pp over 3 years`,
+          message: `${years[years.length-3]}: ${recent[0]}% → ${years[years.length-1]}: ${recent[recent.length-1]}%. Pricing or mix improvement is working.`,
+          value: `+${Math.abs(drop).toFixed(1)}pp`, recommendation: '',
+        });
+      }
+    }
+  }
+ 
+  // ── 3. OpEx categories creeping vs producing revenue ─────────────
+  // The "is this cost producing matching revenue?" lens — a controllable.
+  const cp = costProductivity(D);
+  if (cp) {
+    const creeping = cp.findings.filter(f => f.isCreeping).slice(0, 4);
+    if (creeping.length) {
       out.push({
-        id: 'slow-payers', category: 'cash', severity: 'info',
-        title: `${slow.length} customer${slow.length > 1 ? 's have' : ' has'} an invoice 90+ days out`,
-        message: `Slowest open: ${slow.map(c => `${c.name} (${c.oldestDays}d)`).join(', ')}.`,
-        value: `${slow.length} customers`,
-        recommendation: "Construction-Texas note: 'past due' isn't binding — but knowing who pays slow informs how to price future bids and whether to require deposits.",
+        id: 'cost-creep', category: 'cost', severity: creeping[0].deltaPct > 5 ? 'warning' : 'info',
+        title: `${creeping.length} OpEx categor${creeping.length === 1 ? 'y' : 'ies'} grew faster than revenue`,
+        message: `${cp.yearLatest} vs ${cp.yearPrior}: ` +
+          creeping.map(f => `${f.category.replace(/_/g, ' ')} (${f.priorPctOfRevenue}%→${f.latestPctOfRevenue}%)`).join(', ') + '.',
+        value: creeping[0].category.replace(/_/g, ' '),
+        recommendation: 'For each category: did the extra spend create equivalent revenue capacity? If yes, the growth is investment. If not, it\'s margin leak.',
+      });
+    }
+    const shrinking = cp.findings.filter(f => f.isShrinking && f.materiality >= 1).slice(0, 3);
+    if (shrinking.length >= 2) {
+      out.push({
+        id: 'cost-discipline', category: 'cost', severity: 'positive',
+        title: `${shrinking.length} OpEx categories shrank as a share of revenue`,
+        message: `Cost discipline visible on: ` +
+          shrinking.map(f => `${f.category.replace(/_/g, ' ')} (${f.priorPctOfRevenue}%→${f.latestPctOfRevenue}%)`).join(', ') + '.',
+        value: 'OK', recommendation: '',
       });
     }
   }
  
-  // ── Cash runway ───────────────────────────────────────────────────
-  const runway = cashRunway(D);
-  if (runway?.burning) {
-    out.push({
-      id: 'cash-runway', category: 'cash', severity: runway.runwayMonths < 3 ? 'critical' : 'warning',
-      title: `${runway.runwayMonths} months of cash runway`,
-      message: `At the current rate of operating burn (${fmt(runway.monthlyBurn)}/month), cash lasts ~${runway.runwayMonths} months.`,
-      value: `${runway.runwayMonths}mo`,
-      recommendation: runway.runwayMonths < 3 ? 'Immediate action — accelerate AR collection, defer non-essential AP, draw on credit.' : 'Plan a bridge: AR collection push, financing line, or selective cost cuts.',
-    });
-  } else if (runway && !runway.burning) {
-    out.push({
-      id: 'cash-positive', category: 'cash', severity: 'positive',
-      title: 'Cash flow positive',
-      message: `Operating CF is positive — the business is generating cash, not burning it. Latest cash balance: ${fmt(runway.cash)}.`,
-      value: 'OK',
-      recommendation: '',
-    });
+  // ── 4. Crew productivity / labor leverage ────────────────────────
+  // Revenue ÷ (Wages COGS + Salaries OpEx) tells you how much top-line
+  // each labor dollar is producing. Going up = more efficient delivery.
+  if (pl?.revenue) {
+    const wagesCogs = (pl.cogs || {})['Wages_COGS_'] || (pl.cogs || {})['Wages(COGS)'] || 0;
+    const salariesOpex = (pl.opex || {})['Salaries___Wages'] || (pl.opex || {})['Salaries & Wages'] || 0;
+    const totalLabor = wagesCogs + salariesOpex;
+    if (totalLabor > 0) {
+      const revPerLabor = pl.revenue / totalLabor;
+      // Compare to prior year if available
+      const priorYr = years[years.length - 2];
+      const priorPL = priorYr ? all[priorYr] : null;
+      let priorRevPerLabor = null;
+      if (priorPL?.revenue) {
+        const pw = (priorPL.cogs || {})['Wages_COGS_'] || (priorPL.cogs || {})['Wages(COGS)'] || 0;
+        const ps = (priorPL.opex || {})['Salaries___Wages'] || (priorPL.opex || {})['Salaries & Wages'] || 0;
+        if (pw + ps > 0) priorRevPerLabor = priorPL.revenue / (pw + ps);
+      }
+      const deltaPct = priorRevPerLabor ? ((revPerLabor - priorRevPerLabor) / priorRevPerLabor * 100) : null;
+      if (deltaPct != null && Math.abs(deltaPct) > 10) {
+        out.push({
+          id: 'labor-leverage', category: 'productivity', severity: deltaPct > 0 ? 'positive' : 'warning',
+          title: deltaPct > 0
+            ? `Each labor $ producing ${deltaPct.toFixed(0)}% more revenue YoY`
+            : `Each labor $ producing ${Math.abs(deltaPct).toFixed(0)}% less revenue YoY`,
+          message: `${pl.meta?.period || ''}: $${revPerLabor.toFixed(2)} of revenue per $1 of labor (Wages COGS + Salaries). Prior: $${priorRevPerLabor.toFixed(2)}.`,
+          value: `$${revPerLabor.toFixed(2)}/$1`,
+          recommendation: deltaPct > 0
+            ? ''
+            : 'Lower labor leverage usually means: hired ahead of demand, or work mix shifted toward lower-revenue jobs per crew-hour. Check capacity utilization next.',
+        });
+      }
+    }
   }
  
-  // ── Working capital cycle ─────────────────────────────────────────
-  const cycle = workingCapitalCycle(D);
-  if (cycle?.cycleDays != null) {
-    if (cycle.cycleDays > 60) {
+  // ── 5. Seasonal pace (this year vs same months last year) ────────
+  // Tells Dylan whether the current year is on/off track relative to
+  // the seasonal expectation. Q1 is normally weakest in TX striping.
+  const season = seasonalRevenueCompare(D);
+  if (season?.months?.length) {
+    const lastMonth = season.months[season.months.length - 1];
+    if (lastMonth.ytdYoyPct != null && Math.abs(lastMonth.ytdYoyPct) > 10) {
+      const yoy = lastMonth.ytdYoyPct;
+      const sev = yoy > 25 ? 'positive' : yoy < -20 ? 'warning' : 'info';
       out.push({
-        id: 'wc-cycle-long', category: 'cash', severity: cycle.cycleDays > 90 ? 'warning' : 'info',
-        title: `${cycle.cycleDays}-day working capital cycle`,
-        message: `Customers take ${cycle.dso}d to pay, vendors get paid in ${cycle.dpo}d. SFS is essentially financing ${cycle.cycleDays} days of operations.`,
-        value: `${cycle.cycleDays}d`,
-        recommendation: 'Negotiate longer vendor terms or shorter customer terms. Each 10 days reduction frees up significant working capital.',
+        id: 'seasonal-pace', category: 'pace', severity: sev,
+        title: `${season.currentYear} YTD pacing ${yoy >= 0 ? '+' : ''}${yoy}% vs ${season.priorYear} same months`,
+        message: `Through ${lastMonth.name}: ${fmt(lastMonth.ytdSamePeriodCY)} this year vs ${fmt(lastMonth.ytdSamePeriodPY)} the same months last year.`,
+        value: `${yoy >= 0 ? '+' : ''}${yoy}%`,
+        recommendation: yoy < -20 ? 'Q1 is normally weakest in TX striping (April-Nov is peak); a Q1 dip alone may just be timing. Re-check after May/June numbers.' : '',
       });
     }
   }
  
-  // ── DSCR / SBA readiness ──────────────────────────────────────────
-  const ds = dscr(D);
-  if (ds?.ratio != null) {
-    if (ds.ratio < 1.25) {
-      out.push({
-        id: 'dscr-low', category: 'loan', severity: ds.ratio < 1.0 ? 'critical' : 'warning',
-        title: `DSCR ${ds.ratio}x — below SBA threshold`,
-        message: `EBITDA (${fmt(ds.ebitda)}) covers debt service (${fmt(ds.debtService)}) at ${ds.ratio}x. SBA wants ≥1.25x.`,
-        value: `${ds.ratio}x`,
-        recommendation: 'Either grow EBITDA, restructure debt to lower service, or wait for next cycle to apply.',
-      });
-    } else {
-      out.push({
-        id: 'dscr-ok', category: 'loan', severity: 'positive',
-        title: `DSCR ${ds.ratio}x — meets SBA threshold`,
-        message: `EBITDA covers debt service at ${ds.ratio}x. Lenders typically want ≥1.25x.`,
-        value: `${ds.ratio}x`,
-        recommendation: '',
-      });
-    }
-  }
- 
-  // ── Pipeline health ───────────────────────────────────────────────
+  // ── 6. Pipeline forecast (forward visibility — operational) ──────
   const proj = pipelineProjection(D);
   if (proj) {
     out.push({
-      id: 'pipeline-projection', category: 'pipeline', severity: 'info',
-      title: 'Pipeline → expected revenue',
-      message: `${fmt(proj.pendingValue)} in pending bids × ${proj.historicalRate}% historical dollar win rate ≈ ${fmt(proj.expectedWinValue)} expected wins.`,
+      id: 'pipeline-forecast', category: 'pipeline', severity: 'info',
+      title: 'Forward booking floor from current pipeline',
+      message: `${fmt(proj.pendingValue)} in pending bids × ${proj.historicalRate}% historical $ win rate = ${fmt(proj.expectedWinValue)} expected wins.`,
       value: fmt(proj.expectedWinValue),
-      recommendation: 'Use this as a forecast floor for the next 60-90 days of bookings.',
+      recommendation: 'Use as a planning floor for crew/equipment commitments over the next ~60-90 days.',
     });
   }
  
-  // ── Knowify data quality flag ─────────────────────────────────────
+  // ── 7. Pipeline velocity (planning input) ────────────────────────
+  const vel = pipelineVelocity(D);
+  if (vel?.medianDays != null) {
+    out.push({
+      id: 'pipeline-velocity', category: 'pipeline', severity: 'info',
+      title: `Bid → award median: ${vel.medianDays} days`,
+      message: `Across ${vel.sample} won bids: 25th-pct ${vel.p25}d, median ${vel.medianDays}d, 75th-pct ${vel.p75}d.`,
+      value: `${vel.medianDays}d`,
+      recommendation: 'For capacity planning: a bid submitted today typically books as work ~' + vel.medianDays + ' days out.',
+    });
+  }
+ 
+  // ── 8. Knowify data quality flag (informational) ─────────────────
   const k = D['knowify-jobs'];
   if (k?.jobs) {
     const r = applyKnowifyRules(k.jobs);
     const reclassified = r.competitive.reclassifiedStale + r.competitive.reclassifiedUnbilled;
     if (reclassified > 50) {
       out.push({
-        id: 'knowify-quality', category: 'data-quality', severity: 'info',
-        title: `${reclassified} bids reclassified by SFS rules`,
-        message: `${r.competitive.reclassifiedStale} stale (>120d) and ${r.competitive.reclassifiedUnbilled} unbilled-closed bids were reclassified as losses.`,
+        id: 'knowify-quality', category: 'data', severity: 'info',
+        title: `${reclassified} stale Knowify bids auto-reclassified`,
+        message: `${r.competitive.reclassifiedStale} stale (>120d) + ${r.competitive.reclassifiedUnbilled} unbilled-closed bids flipped to losses by SFS rules. Win-rate metrics use the cleaned set.`,
         value: reclassified,
-        recommendation: 'Closing out stale bids in Knowify directly would clean up reports. The reclassification rules will keep working either way.',
+        recommendation: '',
       });
     }
-  }
- 
-  // ── Cash flow conversion quality ──────────────────────────────────
-  const cfc = cashFlowConversion(D);
-  const lastTwoConv = cfc.filter(c => c.conversionPct != null).slice(-2);
-  if (lastTwoConv.length === 2 && lastTwoConv.every(c => c.conversionPct < 50)) {
-    out.push({
-      id: 'cf-conversion-low', category: 'cash', severity: 'info',
-      title: 'NI → cash conversion is low',
-      message: `Last two years averaged ${((lastTwoConv[0].conversionPct + lastTwoConv[1].conversionPct)/2).toFixed(0)}% — earnings on paper, not in the bank yet.`,
-      value: 'low',
-      recommendation: 'Usually means AR is growing faster than collections. Push collections, watch DSO.',
-    });
   }
  
   return out;
