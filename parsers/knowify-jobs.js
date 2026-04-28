@@ -89,11 +89,14 @@ const PARSER_KNOWIFY = {
         winRate, pipelineTotal: +pipelineTotal.toFixed(2),
       },
       topClients,
+      // No slicing — Pipeline analysis (Dylan's win-rate rules) needs every
+      // bidding job. With ~1,500 bidding rows the JSON is ~1MB, well within
+      // Firebase Realtime DB's per-write 16MB limit.
       jobs: {
-        Active:   (bySheet.Active||[]).slice(-200),
-        Closed:   (bySheet.Closed||[]).slice(-200),
-        Bidding:  (bySheet.Bidding||[]).slice(-200),
-        Rejected: (bySheet.Rejected||[]).slice(-200),
+        Active:   bySheet.Active   || [],
+        Closed:   bySheet.Closed   || [],
+        Bidding:  bySheet.Bidding  || [],
+        Rejected: bySheet.Rejected || [],
       }
     };
   },
