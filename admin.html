@@ -10,6 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="core/firebase.js"></script>
 <script src="core/utils.js"></script>
+<script src="core/nav.js"></script>
 <script src="parsers/qbo-pl.js"></script>
 <script src="parsers/qbo-bs.js"></script>
 <script src="parsers/qbo-cf.js"></script>
@@ -34,7 +35,7 @@
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
 
-/* NAV */
+
 .header{background:var(--bg-panel);border-bottom:2px solid var(--yellow);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100}
 .header-left{display:flex;align-items:center;gap:16px}
 .logo-mark{width:38px;height:38px;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:18px;color:#000}
@@ -181,6 +182,12 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
+<script>
+  // Header rendered by core/nav.js — consistent across all pages
+  injectNavStyles();
+  renderNav('admin');
+</script>
+
 
 <div id="login-screen">
   <div class="login-box">
@@ -194,24 +201,7 @@ a{color:inherit;text-decoration:none}
 </div>
 
 <div id="app-screen">
-  <header class="header">
-    <div class="header-left">
-      <div class="logo-mark">SF</div>
-      <div>
-        <div class="company-name">Semper Fi Striping</div>
-        <div class="company-sub">Financial Platform</div>
-      </div>
-    </div>
-    <nav class="header-nav">
-      <a href="index.html" class="nav-link">Reports</a>
-      <a href="viewer.html" class="nav-link">Viewer</a>
-      <a href="admin.html" class="nav-link" style="color:var(--yellow);border-bottom:2px solid var(--yellow)">Admin</a>
-    </nav>
-    <div class="db-status">
-      <div class="status-dot" id="status-dot"></div>
-      <span id="status-label">Connecting…</span>
-    </div>
-  </header>
+  
 
   <main class="main">
     <div class="page-title">Data Management</div>
@@ -941,12 +931,6 @@ try {
 } catch(e) { /* sessionStorage unavailable */ }
 
 function initApp() {
-  getDB().ref('.info/connected').on('value', snap => {
-    const ok = snap.val();
-    document.getElementById('status-dot').style.background = ok ? 'var(--green)' : 'var(--red)';
-    document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
-  });
-
   buildGrid();
   buildTabs();
 

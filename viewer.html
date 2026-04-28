@@ -9,6 +9,7 @@
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="core/firebase.js"></script>
 <script src="core/utils.js"></script>
+<script src="core/nav.js"></script>
 <style>
 :root {
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -92,21 +93,13 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
-<header class="header">
-  <div class="header-left">
-    <div class="logo-mark">SF</div>
-    <div><div class="company-name">Semper Fi Striping</div><div class="company-sub">Financial Platform</div></div>
-  </div>
-  <nav class="header-nav">
-    <a href="index.html" class="nav-link">Reports</a>
-    <a href="viewer.html" class="nav-link" style="color:var(--yellow);border-bottom:2px solid var(--yellow)">Viewer</a>
-    <a href="admin.html" class="nav-link">Admin</a>
-  </nav>
-  <div class="db-status">
-    <div class="status-dot" id="status-dot"></div>
-    <span id="status-label">Connecting…</span>
-  </div>
-</header>
+<script>
+  // Header rendered by core/nav.js — consistent across all pages
+  injectNavStyles();
+  renderNav('viewer');
+</script>
+
+
 
 <main class="main">
   <div class="page-title">Data Viewer</div>
@@ -126,12 +119,6 @@ a{color:inherit;text-decoration:none}
 
 <script>
 let dbData = {};
-
-getDB().ref('.info/connected').on('value', snap => {
-  const ok = snap.val();
-  document.getElementById('status-dot').style.cssText = `background:${ok?'var(--green)':'var(--red)'}`;
-  document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
-});
 
 DB.onAll(rawData => {
   dbData = rawData || {};
