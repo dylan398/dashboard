@@ -253,7 +253,7 @@ const APP_PASS = 'Semperfi3004!';
 const PARSERS = [PARSER_PL, PARSER_BS, PARSER_CF, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
 const parsedData = {};
 let activeTab = null;
-let firebaseData = {};
+let firebaseManifest = {};
 
 // ── DATA REQUIREMENTS ─────────────────────────────────────────
 // Everything starts Jan 1, 2020
@@ -397,86 +397,75 @@ function buildRequirements() {
 }
 
 // ── CHECK REQUIREMENTS AGAINST FIREBASE ─────────────────────────
-function checkRequirements(reqs, fbData) {
+// checkRequirements now reads from the lightweight MANIFEST, not full Firebase data
+function checkRequirements(reqs, manifest) {
   const now = new Date();
   const thirtyDaysAgo = new Date(now - 30*24*60*60*1000).toISOString().slice(0,10);
 
   return reqs.map(req => {
-    let status = 'missing'; // 'ok' | 'stale' | 'missing'
+    let status = 'missing';
     let detail = '';
     let savedAt = null;
 
-    const ds = fbData[req.dataset] || {};
+    const ds = manifest[req.dataset] || {};
 
     if (req.type === 'period') {
       const periods = ds.periods || {};
-      const entry = periods[req.key];
+      const entry = periods[req.key]; // { savedAt, period }
       if (entry) {
-        savedAt = entry._savedAt || entry.meta?.parsedAt;
+        savedAt = entry.savedAt;
         if (req.isYTD && savedAt && savedAt.slice(0,10) < thirtyDaysAgo) {
           status = 'stale';
           detail = `Last updated ${savedAt.slice(0,10)} — refresh recommended`;
         } else {
           status = 'ok';
-          detail = entry.meta?.period || req.key;
+          detail = entry.period || req.key;
         }
       }
     } else if (req.type === 'snapshot') {
       const snapshots = ds.snapshots || {};
-      // For "current" snapshot, find most recent within ~35 days
       if (req.id === 'bs-current') {
         const keys = Object.keys(snapshots).sort().reverse();
         const recent = keys.find(k => k >= thirtyDaysAgo);
         if (recent) {
           status = 'ok';
-          savedAt = snapshots[recent]._savedAt;
+          savedAt = snapshots[recent]?.savedAt;
           detail = `As of ${recent}`;
         } else if (keys.length > 0) {
           status = 'stale';
-          detail = `Most recent: ${keys[0]} — refresh recommended`;
-          savedAt = snapshots[keys[0]]._savedAt;
+          detail = `Most recent: ${keys[0]} — over 30 days ago`;
+          savedAt = snapshots[keys[0]]?.savedAt;
         }
       } else {
-        // Exact key match (allow ±1 day for Jan 1)
         const entry = snapshots[req.key];
         if (entry) {
           status = 'ok';
-          savedAt = entry._savedAt || entry.meta?.parsedAt;
-          detail = entry.meta?.period || req.key;
+          savedAt = entry.savedAt;
+          detail = entry.period || req.key;
         }
       }
     } else if (req.type === 'merge') {
-      // Sales: check if we have any monthly data
       if (req.dataset === 'qbo-sales') {
-        const monthly = ds.monthlyByYear || {};
-        const years = Object.keys(monthly).sort();
-        if (years.length) {
-          const earliest = years[0];
-          const latest = years[years.length-1];
-          const latestMonths = monthly[latest] || [];
-          const lastMonth = latestMonths.reduce((last, v, i) => v > 0 ? i : last, -1);
-          const savedAtMeta = ds.meta?.mergedAt || ds.meta?.parsedAt;
-          savedAt = savedAtMeta;
-          if (savedAtMeta && savedAtMeta.slice(0,10) < thirtyDaysAgo) {
-            status = 'stale';
-            detail = `Covers ${earliest}–${latest} · Last updated ${savedAtMeta?.slice(0,10)}`;
-          } else {
-            status = years.includes(String(START_YEAR)) ? 'ok' : 'stale';
-            detail = `Covers ${earliest} – ${MONTHS_SHORT[lastMonth]||'?'} ${latest}`;
-          }
+        const { earliest, latest, yearsCovered, updatedAt } = ds;
+        if (yearsCovered && yearsCovered.length) {
+          savedAt = updatedAt;
+          const isStale = updatedAt && updatedAt.slice(0,10) < thirtyDaysAgo;
+          status = isStale ? 'stale' : (yearsCovered.includes(String(START_YEAR)) ? 'ok' : 'stale');
+          detail = `Covers ${earliest}–${latest} (${yearsCovered.length} years)${isStale ? ' · Stale' : ''}`;
         }
       } else if (req.dataset === 'qbo-transactions') {
-        const accounts = ds.accountSummary;
-        if (accounts && accounts.length) {
-          savedAt = ds.meta?.mergedAt || ds.meta?.parsedAt;
-          status = savedAt && savedAt.slice(0,10) < thirtyDaysAgo ? 'stale' : 'ok';
-          detail = `${accounts.length} accounts · Last parsed ${savedAt?.slice(0,10) || '—'}`;
+        const { accountCount, updatedAt, period } = ds;
+        if (accountCount) {
+          savedAt = updatedAt;
+          status = updatedAt && updatedAt.slice(0,10) < thirtyDaysAgo ? 'stale' : 'ok';
+          detail = `${accountCount} accounts · ${period || ''} · Updated ${updatedAt?.slice(0,10)||'—'}`;
         }
       } else if (req.dataset === 'knowify-jobs') {
-        if (ds.summary) {
-          savedAt = ds.meta?.parsedAt;
-          status = savedAt && savedAt.slice(0,10) < thirtyDaysAgo ? 'stale' : 'ok';
-          detail = `${ds.summary.activeJobs || 0} active jobs · Exported ${savedAt?.slice(0,10) || '—'}`;
+        const { lastExport, activeJobs } = ds;
+        if (lastExport) {
+          savedAt = ds._ts;
+          status = lastExport < thirtyDaysAgo ? 'stale' : 'ok';
+          detail = `${activeJobs || 0} active jobs · Exported ${lastExport}`;
         }
       }
     }
@@ -752,29 +741,35 @@ function initApp() {
   buildGrid();
   buildTabs();
 
-  // Load Firebase data and build status panel
-  DB.readAll().then(data => {
-    firebaseData = data || {};
-    renderStatusPanel(firebaseData);
+  // Read lightweight manifest (not full data) for status panel
+  DB.readManifest().then(manifest => {
+    firebaseManifest = manifest || {};
+    renderStatusPanel(firebaseManifest);
   });
 
-  // Live updates to status
-  DB.onAll(data => { firebaseData = data || {}; });
+  // Live manifest updates
+  DB.onManifest(manifest => {
+    firebaseManifest = manifest || {};
+    // Only re-render if panel is already showing (avoid re-render during upload)
+    if (document.getElementById('status-panel').style.display !== 'none') {
+      renderStatusPanel(firebaseManifest);
+    }
+  });
 }
 
-function renderStatusPanel(fbData) {
+function renderStatusPanel(manifest) {
   document.getElementById('status-loading').style.display = 'none';
   const panel = document.getElementById('status-panel');
   panel.style.display = 'block';
   const reqs = buildRequirements();
-  const checked = checkRequirements(reqs, fbData);
+  const checked = checkRequirements(reqs, manifest);
   panel.innerHTML = buildStatusPanel(checked);
 }
 
 async function refreshStatusPanel() {
-  const data = await DB.readAll();
-  firebaseData = data || {};
-  renderStatusPanel(firebaseData);
+  const manifest = await DB.readManifest();
+  firebaseManifest = manifest || {};
+  renderStatusPanel(firebaseManifest);
 }
 </script>
 </body>

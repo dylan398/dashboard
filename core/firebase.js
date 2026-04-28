@@ -63,6 +63,10 @@ const DB = {
     updates[`${base}/periods/${key}`] = sanitize({ ...data, _periodKey: key, _savedAt: new Date().toISOString() });
     updates[`${base}/latest`] = key;
     await getDB().ref().update(updates);
+    // Update lightweight manifest
+    const existing = await this.read(`dashboard/_manifest/${datasetId}/periods`) || {};
+    existing[key] = { savedAt: new Date().toISOString(), period: data.meta?.period || key };
+    await this.updateManifest(datasetId, { periods: existing, latest: key });
   },
 
   async readLatestPeriod(datasetId) {
@@ -90,6 +94,10 @@ const DB = {
     if (!existing || key > existing) {
       await getDB().ref(`dashboard/${datasetId}/latestDate`).set(key);
     }
+    // Update lightweight manifest
+    const existingKeys = await this.read(`dashboard/_manifest/${datasetId}/snapshots`) || {};
+    existingKeys[key] = { savedAt: new Date().toISOString(), period: data.meta?.period || key };
+    await this.updateManifest(datasetId, { snapshots: existingKeys, latestDate: key });
   },
 
   async readLatestSnapshot(datasetId) {
@@ -157,9 +165,14 @@ const DB = {
       meta: { ...newData.meta, mergedAt: new Date().toISOString() }
     });
     await this.set(base, merged_data);
-    // Also archive the upload
-    const key = safeKey(newData.meta?.period || new Date().toISOString().slice(0,10));
-    await this.set(`dashboard/qbo-sales-history/${key}`, sanitize({ _savedAt: new Date().toISOString(), period: newData.meta?.period }));
+    // Update manifest with coverage info
+    const years = Object.keys(merged).sort();
+    await this.updateManifest('qbo-sales', {
+      earliest: years[0] || null,
+      latest: years[years.length-1] || null,
+      yearsCovered: years,
+      updatedAt: new Date().toISOString()
+    });
   },
 
   async mergeTransactionData(newData) {
@@ -176,6 +189,11 @@ const DB = {
       meta: { ...newData.meta, mergedAt: new Date().toISOString() }
     });
     await this.set(base, merged);
+    await this.updateManifest('qbo-transactions', {
+      accountCount: Object.keys(merged.accountSummary || {}).length,
+      updatedAt: new Date().toISOString(),
+      period: newData.meta?.period || ''
+    });
   },
 
   async mergeKnowifyData(newData) {
@@ -184,20 +202,36 @@ const DB = {
     // Archive dated snapshot too
     await this.set(base, sanitize(newData));
     const key = safeKey(newData.meta?.parsedAt?.slice(0, 10) || new Date().toISOString().slice(0,10));
-    await this.set(`dashboard/knowify-history/${key}`, sanitize({
-      summary: newData.summary,
-      topClients: newData.topClients,
-      _savedAt: new Date().toISOString()
-    }));
+    await this.updateManifest('knowify-jobs', {
+      lastExport: key,
+      activeJobs: newData.summary?.activeJobs || 0,
+      totalWonCV: newData.summary?.totalWonCV || 0
+    });
   },
 
-  // ── META ───────────────────────────────────────────────────────
+  // ── META & MANIFEST ────────────────────────────────────────────
   async writeMeta(datasets) {
     await this.set('dashboard/meta', sanitize({
       lastUpdated: new Date().toISOString(),
       datasets,
       updatedBy: 'admin'
     }));
+  },
+
+  // Lightweight manifest — only stores keys/dates, not full data
+  // Status panel reads this instead of entire dashboard
+  async updateManifest(datasetId, updates) {
+    await getDB().ref(`dashboard/_manifest/${datasetId}`)
+      .update(sanitize({ ...updates, _ts: new Date().toISOString() }));
+  },
+
+  async readManifest() {
+    const snap = await getDB().ref('dashboard/_manifest').once('value');
+    return snap.val() || {};
+  },
+
+  onManifest(cb) {
+    getDB().ref('dashboard/_manifest').on('value', snap => cb(snap.val() || {}));
   },
 
   // ── READS FOR DASHBOARD ────────────────────────────────────────
