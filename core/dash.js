@@ -1,6 +1,11 @@
 /* ════════════════════════════════════════════════════════════════════════
    SFS DASHBOARD — SHARED CORE
    ────────────────────────────────────────────────────────────────────────
+   ▶▶▶ READ docs/CONTEXT.md FIRST ◀◀◀
+   That document is the long-form business + industry context that every
+   threshold and metric in this file relies on. The summary below is the
+   minimum you need; CONTEXT.md is the rules of the world.
+   ────────────────────────────────────────────────────────────────────────
    This file is the single source of truth for:
      1. How raw Firebase data gets normalized for reports
      2. How Knowify pipeline data gets re-classified per Dylan's rules
