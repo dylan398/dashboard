@@ -336,8 +336,9 @@ function buildRequirements() {
     ]
   });
 
-  // ── Balance Sheet: Jan 1 snapshot for each year, plus current
-  for (let yr = START_YEAR; yr <= CURRENT_YEAR; yr++) {
+  // ── Balance Sheet: Jan 1 snapshot for each year, plus current.
+  // Skip BS Jan 1, 2020 — QuickBooks account didn't exist that day.
+  for (let yr = START_YEAR + 1; yr <= CURRENT_YEAR; yr++) {
     const key = `${yr}-01-01`;
     reqs.push({
       id: `bs-jan-${yr}`, dataset: 'qbo-bs', group: 'Balance Sheet',
