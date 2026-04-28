@@ -308,6 +308,18 @@ function clearAll() {
   updateCommitCount();
 }
 
+function sanitize(obj) {
+  // Firebase rejects undefined — convert to null recursively
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitize);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = sanitize(v);
+  }
+  return out;
+}
+
 async function pushToFirebase() {
   const ids = Object.keys(parsedData);
   if (!ids.length) { alert('No data to push. Parse at least one file first.'); return; }
@@ -319,7 +331,7 @@ async function pushToFirebase() {
   try {
     for (const id of ids) {
       status.textContent = 'Writing ' + id + '…';
-      await DB.write(id, parsedData[id]);
+      await DB.write(id, sanitize(parsedData[id]));
     }
     await DB.write('meta', {
       lastUpdated: new Date().toISOString(),
