@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<!--
+  Insights — auto-generated business observations.
+ 
+  This page reads everything in Firebase, runs every cross-data combination
+  defined in core/dash.js, and emits a stack of insight cards. The actual
+  metric logic lives in dash.js (revenueGrowth, marginErosion, cashRunway,
+  dscr, customerLedger, customerHealth, pipelineProjection, …). This page
+  is purely presentational.
+ 
+  When adding a new insight: add a metric to dash.js, then add a case to
+  generateInsights() there. The card here will pick it up automatically
+  because we render whatever generateInsights returns.
+ 
+  Sections (in render order):
+    1. Auto-insight cards (severity-coded)
+    2. Customer ledger — combines lifetime sales × open AR × pipeline flag
+    3. Working-capital cycle (DSO, DPO, days SFS finances ops)
+    4. Margin erosion table — OpEx categories growing faster than revenue
+    5. Pipeline → revenue projection
+    6. Cash runway / DSCR / loan-readiness panel
+    7. Cash flow conversion (NI → OCF quality of earnings)
+    8. Revenue YoY growth + cost ratio drift heatmap
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Insights</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js"></script>
+<script src="../core/utils.js"></script>
+<script src="../core/dash.js"></script>
+<script src="../core/nav.js"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+ 
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+ 
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+ 
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+ 
+/* Insight cards — color-coded by severity */
+.insight-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px}
+.insight{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid;padding:16px 18px;transition:border-color .2s}
+.insight:hover{border-right-color:var(--yellow)}
+.insight.positive{border-left-color:var(--green)}
+.insight.info{border-left-color:var(--blue)}
+.insight.warning{border-left-color:var(--orange)}
+.insight.critical{border-left-color:var(--red)}
+.insight-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:12px}
+.insight-title{font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.02em;color:var(--txt-primary);text-transform:uppercase;flex:1}
+.insight-value{font-family:var(--font-mono);font-size:18px;font-weight:700;white-space:nowrap}
+.insight.positive .insight-value{color:var(--green)}
+.insight.info .insight-value{color:var(--blue)}
+.insight.warning .insight-value{color:var(--orange)}
+.insight.critical .insight-value{color:var(--red)}
+.insight-msg{color:var(--txt-secondary);font-size:13px;line-height:1.5;margin-bottom:8px}
+.insight-rec{color:var(--txt-muted);font-size:12px;line-height:1.5;font-style:italic;border-top:1px dashed var(--border);padding-top:8px}
+.insight-rec::before{content:'→ ';color:var(--yellow);font-style:normal;font-weight:700}
+.insight-cat{display:inline-block;font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--txt-muted);background:var(--bg-hover);padding:2px 7px;border-radius:2px;text-transform:uppercase;margin-right:6px}
+ 
+/* Tables */
+.t{width:100%;border-collapse:collapse;font-size:12px}
+.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
+.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
+.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.t td.muted{color:var(--txt-muted);font-size:11px}
+.t tr:hover{background:var(--bg-hover)}
+.t-scroll{max-height:520px;overflow-y:auto;background:var(--bg-card)}
+ 
+/* Health-bar pill */
+.health-bar{width:80px;height:7px;background:var(--bg-hover);border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px}
+.health-fill{height:100%;border-radius:2px}
+ 
+/* Working capital cycle viz */
+.wc-cycle{display:grid;grid-template-columns:1fr 60px 1fr;gap:0;align-items:center;margin:14px 0}
+.wc-half{padding:18px;text-align:center;background:var(--bg-hover);border:1px solid var(--border)}
+.wc-half .label{font-family:var(--font-display);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.wc-half .num{font-family:var(--font-mono);font-size:32px;font-weight:700;color:var(--yellow)}
+.wc-half .sub{color:var(--txt-muted);font-size:11px;margin-top:4px}
+.wc-arrow{text-align:center;color:var(--yellow);font-size:24px;font-family:var(--font-display)}
+ 
+/* Heatmap */
+.heatmap{display:grid;gap:1px;font-size:10px;background:var(--border-bright);padding:1px}
+.heatmap-row{display:grid;grid-template-columns:170px repeat(var(--years),1fr);gap:1px}
+.heatmap-row .cat{background:var(--bg-card);padding:5px 8px;color:var(--txt-secondary);font-size:11px}
+.heatmap-row .cell{background:var(--bg-card);padding:5px;text-align:center;font-family:var(--font-mono);color:var(--txt-primary)}
+.heatmap-row.hd .cat{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.06em;color:var(--txt-muted);font-size:10px}
+.heatmap-row.hd .cell{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.06em;color:var(--txt-muted);font-size:10px}
+ 
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+ 
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
+ 
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Insights</div>
+  <div class="page-sub">Auto-generated observations from cross-data analysis. Severity is informational, not alarmist.</div>
+ 
+  <div id="empty-state" class="empty-state" style="display:none">
+    Not enough data yet to generate insights. Upload P&L, Balance Sheet, Sales, and at least one Open Invoices snapshot.
+  </div>
+ 
+  <div id="content" style="display:none">
+ 
+    <!-- ━━━ Section 1: Auto-insight cards ━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="section-label"><span><span class="accent">▸</span> Top Findings</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px" id="insight-count">—</span></div>
+    <div class="insight-grid" id="insight-grid"></div>
+ 
+    <!-- ━━━ Section 2: Customer ledger combining sales × AR × pipeline ━━━ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span> Customer Ledger</span>
+      <span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Lifetime revenue × open AR × pipeline flag · sorted by combined value</span>
+    </div>
+    <div class="panel" style="padding:0">
+      <div class="t-scroll" style="max-height:520px"><table class="t" id="t-ledger">
+        <thead><tr><th>Customer</th><th>Health</th><th>Lifetime $</th><th>Open AR</th><th>Open inv.</th><th>Oldest open</th><th>Pipeline GC?</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+ 
+    <!-- ━━━ Section 3: Working capital cycle ━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="section-label"><span><span class="accent">▸</span> Working Capital Cycle</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">DSO − DPO = days SFS finances operations</span></div>
+    <div class="panel" id="wc-panel"></div>
+ 
+    <!-- ━━━ Section 4: Margin erosion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Margin Erosion</span><span class="meta">YoY cost ratio drift</span></div>
+        <div id="erosion-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Pipeline → Expected Revenue</span><span class="meta">Pending × historical $ win rate</span></div>
+        <div id="pipeline-proj-block"></div>
+      </div>
+    </div>
+ 
+    <!-- ━━━ Section 5: Loan readiness ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="section-label"><span><span class="accent">▸</span> Loan Readiness (SBA-style)</span></div>
+    <div class="grid-3">
+      <div class="kpi" style="--kpi-color:var(--blue)" id="kpi-runway"></div>
+      <div class="kpi" style="--kpi-color:var(--green)" id="kpi-dscr"></div>
+      <div class="kpi" style="--kpi-color:var(--yellow)" id="kpi-conc"></div>
+    </div>
+ 
+    <!-- ━━━ Section 6: Cash flow conversion ━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>NI → Operating Cash Flow Conversion</span><span class="meta">Quality of earnings</span></div>
+        <div class="chart-wrap h220"><canvas id="chart-conversion"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Revenue YoY Growth</span><span class="meta">% change year over year</span></div>
+        <div class="chart-wrap h220"><canvas id="chart-growth"></canvas></div>
+      </div>
+    </div>
+ 
+    <!-- ━━━ Section 7: Cost ratio heatmap ━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <div class="section-label"><span><span class="accent">▸</span> OpEx % of Revenue Heatmap</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Yellow = growing share · Green = shrinking share</span></div>
+    <div class="panel" style="padding:14px"><div id="heatmap"></div></div>
+  </div>
+</main>
+ 
+<script>
+injectNavStyles();
+renderNav('insights');
+setupChartTheme();
+ 
+let charts = {};
+ 
+loadDashboard((D, raw) => {
+  if (!D || Object.keys(raw || {}).filter(k => !k.startsWith('_') && k !== 'meta').length < 2) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('content').style.display = 'none';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+ 
+  renderInsights(D);
+  renderLedger(D);
+  renderWorkingCapital(D);
+  renderErosion(D);
+  renderPipelineProjection(D);
+  renderLoanReadiness(D);
+  renderConversion(D);
+  renderGrowth(D);
+  renderHeatmap(D);
+});
+ 
+// ── 1. Insight cards ───────────────────────────────────────────────
+function renderInsights(D) {
+  const items = generateInsights(D);
+  document.getElementById('insight-count').textContent = `${items.length} insight${items.length !== 1 ? 's' : ''}`;
+  if (!items.length) {
+    document.getElementById('insight-grid').innerHTML =
+      '<div class="empty-state" style="grid-column:1/-1">Nothing notable to report — all key metrics within normal ranges.</div>';
+    return;
+  }
+  // Order: critical → warning → info → positive
+  const order = { critical: 0, warning: 1, info: 2, positive: 3 };
+  items.sort((a, b) => (order[a.severity] || 99) - (order[b.severity] || 99));
+  document.getElementById('insight-grid').innerHTML = items.map(i => `
+    <div class="insight ${i.severity}">
+      <div class="insight-head">
+        <div class="insight-title"><span class="insight-cat">${i.category}</span>${i.title}</div>
+        <div class="insight-value">${i.value}</div>
+      </div>
+      <div class="insight-msg">${i.message}</div>
+      ${i.recommendation ? `<div class="insight-rec">${i.recommendation}</div>` : ''}
+    </div>`).join('');
+}
+ 
+// ── 2. Customer ledger ─────────────────────────────────────────────
+function renderLedger(D) {
+  const ledger = customerLedger(D);
+  const totalLifetime = (D['qbo-sales']?.totalRevenue) || 0;
+  const tbody = document.querySelector('#t-ledger tbody');
+  if (!ledger || !ledger.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No customer data yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = ledger.slice(0, 60).map(c => {
+    const score = customerHealth(c, totalLifetime) || 0;
+    const scoreColor = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--yellow)' : 'var(--red)';
+    const oldestColor = c.oldestOpenDays > 120 ? 'var(--red)' : c.oldestOpenDays > 60 ? 'var(--orange)' : 'var(--txt-primary)';
+    return `<tr>
+      <td><strong>${c.name}</strong></td>
+      <td><span class="health-bar"><span class="health-fill" style="width:${score}%;background:${scoreColor}"></span></span><span style="font-family:var(--font-mono);font-size:11px;color:${scoreColor}">${score}</span></td>
+      <td class="num">${fmt(c.lifetimeRevenue)}</td>
+      <td class="num">${c.currentOpen ? fmt(c.currentOpen) : '<span class="muted">—</span>'}</td>
+      <td class="num muted">${c.openInvoiceCount || '—'}</td>
+      <td class="num" style="color:${oldestColor}">${c.oldestOpenDays ? c.oldestOpenDays + 'd' : '—'}</td>
+      <td>${c.isInPipeline ? '<span style="color:var(--blue);font-family:var(--font-mono);font-size:11px">● bidding</span>' : '<span class="muted">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+ 
+// ── 3. Working capital cycle ───────────────────────────────────────
+function renderWorkingCapital(D) {
+  const c = workingCapitalCycle(D);
+  const el = document.getElementById('wc-panel');
+  if (!c) {
+    el.innerHTML = '<div class="empty-state">Need P&L + AR + AP data to compute the cycle.</div>';
+    return;
+  }
+  const cycleColor = c.cycleDays > 60 ? 'var(--orange)' : c.cycleDays > 30 ? 'var(--yellow)' : 'var(--green)';
+  el.innerHTML = `
+    <div class="wc-cycle">
+      <div class="wc-half">
+        <div class="label">Days Sales Outstanding (DSO)</div>
+        <div class="num" style="color:var(--orange)">${c.dso}d</div>
+        <div class="sub">${fmtK(c.arBalance)} AR ÷ daily revenue</div>
+      </div>
+      <div class="wc-arrow">−</div>
+      <div class="wc-half">
+        <div class="label">Days Payable Outstanding (DPO)</div>
+        <div class="num" style="color:var(--green)">${c.dpo != null ? c.dpo + 'd' : '—'}</div>
+        <div class="sub">${c.apBalance ? fmtK(c.apBalance) + ' AP ÷ daily COGS' : 'no AP data'}</div>
+      </div>
+    </div>
+    ${c.cycleDays != null ? `
+    <div style="text-align:center;margin-top:14px;padding:14px;background:var(--bg-hover);border:1px solid var(--border)">
+      <div style="font-family:var(--font-display);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px">Cash Conversion Cycle</div>
+      <div style="font-family:var(--font-mono);font-size:38px;font-weight:700;color:${cycleColor}">${c.cycleDays}d</div>
+      <div style="color:var(--txt-secondary);font-size:13px;margin-top:8px;line-height:1.5">
+        ${c.cycleDays > 0
+          ? `SFS finances <strong>${c.cycleDays} days</strong> of operations. Each 10-day reduction frees roughly ${fmtK(c.arBalance/((c.dso||1)/10))} in cash.`
+          : `<strong>Negative cycle</strong> — vendors finance customers' payment terms. Excellent position.`}
+      </div>
+    </div>` : ''}`;
+}
+ 
+// ── 4. Margin erosion ──────────────────────────────────────────────
+function renderErosion(D) {
+  const e = marginErosion(D);
+  const el = document.getElementById('erosion-block');
+  if (!e || !e.findings.length) {
+    el.innerHTML = '<div class="empty-state">No cost categories grew significantly faster than revenue. Margins holding.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="font-size:12px;color:var(--txt-muted);margin-bottom:10px">Comparing <strong style="color:var(--txt-secondary)">${e.yearLatest}</strong> vs <strong style="color:var(--txt-secondary)">${e.yearPrior}</strong> · only categories that grew &gt;25% as a share of revenue</div>
+    <table class="t">
+      <thead><tr><th>Category</th><th>Then</th><th>Now</th><th>Δ rev share</th></tr></thead>
+      <tbody>
+        ${e.findings.slice(0, 10).map(f => `<tr>
+          <td>${f.category.replace(/_/g, ' ')}</td>
+          <td class="num muted">${f.priorPct}%</td>
+          <td class="num">${f.latestPct}%</td>
+          <td class="num" style="color:var(--orange)">+${f.relGrowth}%</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+ 
+// ── 5. Pipeline projection ─────────────────────────────────────────
+function renderPipelineProjection(D) {
+  const p = pipelineProjection(D);
+  const el = document.getElementById('pipeline-proj-block');
+  if (!p) {
+    el.innerHTML = '<div class="empty-state">Need Knowify data with closed/lost history to project.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+      <div style="background:var(--bg-hover);padding:14px;border:1px solid var(--border);text-align:center">
+        <div style="font-family:var(--font-display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:4px">Pending value</div>
+        <div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--yellow)">${fmtK(p.pendingValue)}</div>
+        <div style="color:var(--txt-muted);font-size:11px;margin-top:3px">${p.pendingBids} bids</div>
+      </div>
+      <div style="background:var(--bg-hover);padding:14px;border:1px solid var(--border);text-align:center">
+        <div style="font-family:var(--font-display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:4px">$ Win rate</div>
+        <div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--blue)">${p.historicalRate}%</div>
+        <div style="color:var(--txt-muted);font-size:11px;margin-top:3px">historical</div>
+      </div>
+      <div style="background:var(--bg-hover);padding:14px;border:1px solid var(--border);text-align:center">
+        <div style="font-family:var(--font-display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:4px">Expected wins</div>
+        <div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--green)">${fmtK(p.expectedWinValue)}</div>
+        <div style="color:var(--txt-muted);font-size:11px;margin-top:3px">forecast floor</div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--txt-muted);line-height:1.5">
+      Treat this as a leading indicator, not a calendar forecast. Time-from-bid-to-revenue isn't tracked yet — add invoicing dates to a future Knowify update.
+    </div>`;
+}
+ 
+// ── 6. Loan readiness ──────────────────────────────────────────────
+function renderLoanReadiness(D) {
+  const runway = cashRunway(D);
+  const ds = dscr(D);
+  const sales = D['qbo-sales'] || {};
+  const conc = customerConcentration(sales.topCustomers, sales.totalRevenue, 5);
+ 
+  const rEl = document.getElementById('kpi-runway');
+  if (runway?.burning) {
+    const color = runway.runwayMonths < 3 ? 'red' : runway.runwayMonths < 6 ? 'orange' : 'yellow';
+    rEl.innerHTML = `<div class="kpi-label">Cash runway</div><div class="kpi-value ${color}">${runway.runwayMonths}mo</div><div class="kpi-sub">at ${fmtK(runway.monthlyBurn)}/mo burn</div>`;
+  } else if (runway) {
+    rEl.innerHTML = `<div class="kpi-label">Cash runway</div><div class="kpi-value green">cash flow positive</div><div class="kpi-sub">no monthly burn</div>`;
+  } else {
+    rEl.innerHTML = `<div class="kpi-label">Cash runway</div><div class="kpi-value">—</div><div class="kpi-sub">no data</div>`;
+  }
+ 
+  const dEl = document.getElementById('kpi-dscr');
+  if (ds?.ratio != null) {
+    const color = ds.ratio >= 1.25 ? 'green' : ds.ratio >= 1 ? 'orange' : 'red';
+    dEl.innerHTML = `<div class="kpi-label">DSCR</div><div class="kpi-value ${color}">${ds.ratio}x</div><div class="kpi-sub">SBA wants ≥ 1.25x</div>`;
+  } else {
+    dEl.innerHTML = `<div class="kpi-label">DSCR</div><div class="kpi-value">—</div><div class="kpi-sub">${ds?.note || 'incomplete data'}</div>`;
+  }
+ 
+  const cEl = document.getElementById('kpi-conc');
+  if (conc) {
+    const color = conc.pctOfTotal > 60 ? 'red' : conc.pctOfTotal > 40 ? 'orange' : 'green';
+    cEl.innerHTML = `<div class="kpi-label">Top-5 customer concentration</div><div class="kpi-value ${color}">${conc.pctOfTotal}%</div><div class="kpi-sub">SBA flags &gt;40%</div>`;
+  } else {
+    cEl.innerHTML = `<div class="kpi-label">Top-5 customer concentration</div><div class="kpi-value">—</div><div class="kpi-sub">no data</div>`;
+  }
+}
+ 
+// ── 7. Cash flow conversion ────────────────────────────────────────
+function renderConversion(D) {
+  const data = cashFlowConversion(D);
+  const series = data.filter(d => d.conversionPct != null);
+  const ctx = document.getElementById('chart-conversion');
+  if (charts.conv) charts.conv.destroy();
+  if (!series.length) {
+    ctx.parentElement.innerHTML = '<div class="empty-state">Need P&L + Cash Flow for ≥1 year.</div>';
+    return;
+  }
+  charts.conv = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: series.map(s => s.year), datasets: [{
+      label: 'NI → OCF %', data: series.map(s => s.conversionPct),
+      backgroundColor: series.map(s => s.conversionPct >= 100 ? CHART_COLORS.green + 'aa' : s.conversionPct >= 50 ? CHART_COLORS.yellow + 'aa' : CHART_COLORS.red + 'aa'),
+      borderColor: series.map(s => s.conversionPct >= 100 ? CHART_COLORS.green : s.conversionPct >= 50 ? CHART_COLORS.yellow : CHART_COLORS.red),
+      borderWidth: 1,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => v + '%' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.parsed.y + '% (NI: ' + fmt(series[c.dataIndex].netIncome) + ', OCF: ' + fmt(series[c.dataIndex].operatingCF) + ')' } } } },
+  });
+}
+ 
+function renderGrowth(D) {
+  const g = revenueGrowth(D).filter(r => r.yoyPct != null);
+  const ctx = document.getElementById('chart-growth');
+  if (charts.growth) charts.growth.destroy();
+  if (!g.length) {
+    ctx.parentElement.innerHTML = '<div class="empty-state">Need at least 2 years of P&L.</div>';
+    return;
+  }
+  charts.growth = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: g.map(r => r.year), datasets: [{
+      label: 'YoY %', data: g.map(r => r.yoyPct),
+      backgroundColor: g.map(r => r.yoyPct >= 0 ? CHART_COLORS.green + 'aa' : CHART_COLORS.red + 'aa'),
+      borderColor: g.map(r => r.yoyPct >= 0 ? CHART_COLORS.green : CHART_COLORS.red),
+      borderWidth: 1,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => v + '%' } } } },
+  });
+}
+ 
+// ── 8. OpEx heatmap ────────────────────────────────────────────────
+function renderHeatmap(D) {
+  const trend = opexTrend(D);
+  const cats = Object.keys(trend);
+  if (!cats.length) {
+    document.getElementById('heatmap').innerHTML = '<div class="empty-state">No OpEx history.</div>';
+    return;
+  }
+  const years = trend[cats[0]].map(d => d.year);
+  const relevant = cats.filter(c => trend[c].some(d => d.pctOfRevenue != null && d.pctOfRevenue > 0.5));
+  relevant.sort((a, b) => {
+    const aLatest = trend[a][trend[a].length - 1]?.pctOfRevenue || 0;
+    const bLatest = trend[b][trend[b].length - 1]?.pctOfRevenue || 0;
+    return bLatest - aLatest;
+  });
+ 
+  const colorFor = (firstPct, lastPct) => {
+    if (firstPct == null || lastPct == null) return 'transparent';
+    const delta = lastPct - firstPct;
+    if (Math.abs(delta) < 0.5) return 'transparent';
+    if (delta > 0) {
+      const intensity = Math.min(1, delta / 5);
+      return `rgba(245,200,66,${0.15 + intensity * 0.5})`;
+    } else {
+      const intensity = Math.min(1, Math.abs(delta) / 5);
+      return `rgba(62,207,142,${0.15 + intensity * 0.5})`;
+    }
+  };
+ 
+  const headerRow = `<div class="heatmap-row hd" style="--years:${years.length}"><div class="cat">Category</div>${years.map(y => `<div class="cell">${y}</div>`).join('')}</div>`;
+  const dataRows = relevant.slice(0, 18).map(cat => {
+    const rowData = trend[cat];
+    const firstPct = rowData[0]?.pctOfRevenue;
+    return `<div class="heatmap-row" style="--years:${years.length}">
+      <div class="cat">${cat.replace(/_/g, ' ')}</div>
+      ${rowData.map(d => {
+        const bg = colorFor(firstPct, d.pctOfRevenue);
+        return `<div class="cell" style="background:${bg}">${d.pctOfRevenue != null ? d.pctOfRevenue.toFixed(1) : '—'}</div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+ 
+  document.getElementById('heatmap').innerHTML = `<div class="heatmap">${headerRow}${dataRows}</div>`;
+}
+</script>
+</body>
+</html>
