@@ -16,6 +16,10 @@
 <script src="parsers/qbo-sales.js"></script>
 <script src="parsers/qbo-transactions.js"></script>
 <script src="parsers/knowify-jobs.js"></script>
+<script src="parsers/qbo-ar-aging.js"></script>
+<script src="parsers/qbo-ap-aging.js"></script>
+<script src="parsers/qbo-open-invoices.js"></script>
+<script src="parsers/qbo-pl-monthly.js"></script>
 <style>
 :root {
   --bg-base:#0d0f14; --bg-panel:#13161e; --bg-card:#191d28; --bg-hover:#1e2330;
@@ -259,7 +263,7 @@ a{color:inherit;text-decoration:none}
 <script>
 const APP_PASS = 'Semperfi3004!';
 const SESSION_KEY = 'sfs-admin-auth';
-const PARSERS = [PARSER_PL, PARSER_BS, PARSER_CF, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
+const PARSERS = [PARSER_PL, PARSER_PL_MONTHLY, PARSER_BS, PARSER_CF, PARSER_AR_AGING, PARSER_AP_AGING, PARSER_OPEN_INVOICES, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
 const parsedData = {};      // { id: parsedDataObject }
 const parsedWarnings = {};  // { id: ['warning text', ...] }
 const pushResults = {};     // { id: { ok: bool, key?: string, error?: string } }
@@ -307,6 +311,63 @@ function buildRequirements() {
       `Date range: <code>Jan 1, ${CURRENT_YEAR}</code> → <code>Today</code>`,
       `Accounting method: Accrual`,
       `Export → Download as CSV`
+    ]
+  });
+
+
+  // ── Monthly P&L for current year (single requirement, period strategy)
+  reqs.push({
+    id: `pl-monthly-${CURRENT_YEAR}`, dataset: 'qbo-pl-monthly', group: 'P&L by Month',
+    label: `P&L by Month — ${CURRENT_YEAR}`, type: 'period', key: String(CURRENT_YEAR),
+    description: `Monthly breakdown of ${CURRENT_YEAR} (refresh monthly)`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Profit and Loss`,
+      `Date range: <code>Jan 1, ${CURRENT_YEAR}</code> → <code>Today</code>`,
+      `<strong>Display columns by:</strong> <code>Months</code>`,
+      `Accounting method: Accrual`,
+      `Export → Download as CSV`
+    ]
+  });
+
+  // ── A/R Aging Summary (snapshot, refresh monthly)
+  reqs.push({
+    id: `ar-aging-current`, dataset: 'qbo-ar-aging', group: 'A/R Aging',
+    label: `A/R Aging — Current`, type: 'snapshot', key: TODAY,
+    description: `Customer aging buckets — refresh monthly`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → A/R Aging Summary`,
+      `As of date: <code>Today</code>`,
+      `Aging method: Days past due`,
+      `<strong>Export → Download as CSV</strong> (not PDF)`
+    ]
+  });
+
+  // ── A/P Aging Summary (snapshot, refresh monthly)
+  reqs.push({
+    id: `ap-aging-current`, dataset: 'qbo-ap-aging', group: 'A/P Aging',
+    label: `A/P Aging — Current`, type: 'snapshot', key: TODAY,
+    description: `Vendor aging buckets — refresh monthly`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → A/P Aging Summary`,
+      `As of date: <code>Today</code>`,
+      `Aging method: Days past due`,
+      `<strong>Export → Download as CSV</strong> (not PDF)`
+    ]
+  });
+
+  // ── Open Invoices (snapshot, refresh weekly)
+  reqs.push({
+    id: `open-invoices-current`, dataset: 'qbo-open-invoices', group: 'Open Invoices',
+    label: `Open Invoices — Current`, type: 'snapshot', key: TODAY,
+    description: `Invoice-level AR detail — refresh weekly`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Open Invoices`,
+      `As of date: <code>Today</code>`,
+      `Export → Download as Excel (.xlsx)`
     ]
   });
 
