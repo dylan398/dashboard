@@ -21,7 +21,7 @@
   --bg-base:#0d0f14; --bg-panel:#13161e; --bg-card:#191d28; --bg-hover:#1e2330;
   --border:#252a38; --border-bright:#2e3448;
   --yellow:#f5c842; --yellow-dim:#c9a02e; --orange:#e07b2b;
-  --red:#e05252; --green:#3ecf8e; --blue:#4a9eff;
+  --red:#e05252; --green:#3ecf8e; --blue:#4a9eff; --purple:#9b6dff;
   --txt-primary:#e8eaf0; --txt-secondary:#8a90a0; --txt-muted:#555c70;
   --font-display:'Barlow Condensed',sans-serif;
   --font-body:'Barlow',sans-serif; --font-mono:'JetBrains Mono',monospace;
@@ -42,11 +42,6 @@ a{color:inherit;text-decoration:none}
 .db-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-muted)}
 .status-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-muted)}
 
-/* MAIN */
-.main{padding:28px;max-width:1200px;margin:0 auto}
-.page-title{font-family:var(--font-display);font-size:28px;font-weight:700;letter-spacing:.04em;margin-bottom:6px}
-.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:28px}
-
 /* LOGIN */
 #login-screen{display:flex;align-items:center;justify-content:center;min-height:80vh}
 .login-box{background:var(--bg-card);border:1px solid var(--border);padding:40px;width:360px;text-align:center}
@@ -54,71 +49,124 @@ a{color:inherit;text-decoration:none}
 .login-box p{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
 .login-box input{width:100%;background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:10px 14px;font-size:14px;margin-bottom:12px;font-family:var(--font-body)}
 .login-box input:focus{outline:none;border-color:var(--yellow)}
+
+/* BUTTONS */
 .btn{background:var(--yellow);color:#000;border:none;padding:10px 24px;font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:opacity .2s;width:100%}
 .btn:hover{opacity:.85}
-.btn-outline{background:transparent;border:1px solid var(--border-bright);color:var(--txt-secondary);font-size:13px;font-family:var(--font-display);padding:8px 16px;cursor:pointer;transition:all .2s}
+.btn-sm{padding:5px 12px;font-size:12px;width:auto;letter-spacing:.04em}
+.btn-outline{background:transparent;border:1px solid var(--border-bright);color:var(--txt-secondary);font-family:var(--font-display);padding:7px 14px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;transition:all .2s}
 .btn-outline:hover{border-color:var(--yellow);color:var(--yellow)}
 .btn-green{background:var(--green);color:#000}
+.btn-red{background:transparent;border:1px solid var(--red);color:var(--red)}
+.btn-red:hover{background:var(--red);color:#000}
 
-/* PARSER GRID */
+/* MAIN */
 #app-screen{display:none}
-.parsers-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
-.parser-card{background:var(--bg-card);border:1px solid var(--border);padding:0;transition:border-color .2s;position:relative}
+.main{padding:28px;max-width:1400px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:28px;font-weight:700;letter-spacing:.04em;margin-bottom:4px}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:28px}
+.section-header{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.section-header .accent{color:var(--yellow);margin-right:8px}
+
+/* STATUS GRID ─────────────────────────────────────────── */
+.status-section{background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px}
+.status-section-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.status-section-title{font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary)}
+.status-counts{display:flex;gap:12px;font-family:var(--font-mono);font-size:11px}
+.sc-green{color:var(--green)}.sc-yellow{color:var(--yellow)}.sc-red{color:var(--red)}
+
+.status-table{width:100%;border-collapse:collapse}
+.status-table th{text-align:left;padding:7px 18px;font-family:var(--font-display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);border-bottom:1px solid var(--border-bright)}
+.status-table td{padding:8px 18px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12px}
+.status-table tr:last-child td{border-bottom:none}
+.status-table tr:hover{background:var(--bg-hover)}
+.status-table tr.missing-row{background:rgba(224,82,82,.04)}
+.status-table tr.stale-row{background:rgba(224,123,43,.04)}
+
+.need-label{font-weight:500;color:var(--txt-primary);font-size:13px}
+.need-sub{color:var(--txt-muted);font-size:11px;margin-top:2px}
+.need-export{color:var(--txt-muted);font-size:11px;margin-top:3px;font-family:var(--font-mono)}
+
+/* STATUS PILLS */
+.pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;padding:3px 8px;border:1px solid;border-radius:2px;white-space:nowrap}
+.pill-green{border-color:var(--green);color:var(--green);background:rgba(62,207,142,.08)}
+.pill-yellow{border-color:var(--yellow);color:var(--yellow);background:rgba(245,200,66,.08)}
+.pill-red{border-color:var(--red);color:var(--red);background:rgba(224,82,82,.08)}
+.pill-muted{border-color:var(--border-bright);color:var(--txt-muted)}
+
+/* STALE INDICATOR */
+.stale-badge{font-family:var(--font-mono);font-size:10px;color:var(--orange);border:1px solid var(--orange);padding:2px 6px;margin-left:6px}
+
+/* UPLOAD PANEL ────────────────────────────────────────── */
+.upload-section{background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px}
+.upload-section-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.upload-section-head:hover{background:var(--bg-hover)}
+.upload-toggle{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted)}
+.upload-body{padding:18px;display:none}
+.upload-body.open{display:block}
+
+.parsers-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.parser-card{background:var(--bg-hover);border:1px solid var(--border);padding:0;transition:border-color .2s}
 .parser-card.has-data{border-color:var(--green)}
 .parser-card.error{border-color:var(--red)}
 .parser-card.loading{border-color:var(--yellow)}
-.pc-header{padding:16px 18px 12px;border-bottom:1px solid var(--border)}
-.pc-title{font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:2px}
+.pc-header{padding:12px 16px 10px;border-bottom:1px solid var(--border)}
+.pc-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:2px}
 .pc-hint{font-size:11px;color:var(--txt-muted);line-height:1.5}
-.pc-body{padding:14px 18px}
-.drop-zone{border:1px dashed var(--border-bright);padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.pc-body{padding:12px 16px}
+.drop-zone{border:1px dashed var(--border-bright);padding:18px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
 .drop-zone:hover,.drop-zone.drag-over{border-color:var(--yellow);background:rgba(245,200,66,.04)}
 .drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-.drop-zone-icon{font-size:22px;margin-bottom:6px;color:var(--txt-muted)}
-.drop-zone-text{font-size:12px;color:var(--txt-muted)}
-.drop-zone.has-file .drop-zone-icon{color:var(--green)}
-.drop-zone.has-file .drop-zone-text{color:var(--green)}
-.pc-status{font-size:11px;margin-top:10px;min-height:16px}
-.pc-status.ok{color:var(--green)}
-.pc-status.err{color:var(--red)}
-.pc-status.loading{color:var(--yellow)}
+.drop-zone-icon{font-size:20px;margin-bottom:5px;color:var(--txt-muted)}
+.drop-zone-text{font-size:11px;color:var(--txt-muted)}
+.drop-zone.has-file .drop-zone-icon,.drop-zone.has-file .drop-zone-text{color:var(--green)}
+.pc-status{font-size:11px;margin-top:8px;min-height:14px}
+.pc-status.ok{color:var(--green)}.pc-status.err{color:var(--red)}.pc-status.loading{color:var(--yellow)}
 
-/* PREVIEW AREA */
-.preview-wrap{background:var(--bg-card);border:1px solid var(--border);margin-top:28px}
+/* PREVIEW ────────────────────────────────────────────── */
+.preview-wrap{background:var(--bg-card);border:1px solid var(--border);margin-top:14px}
 .preview-tabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
-.preview-tab{padding:10px 18px;font-size:12px;font-family:var(--font-display);letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0}
+.preview-tab{padding:9px 16px;font-size:12px;font-family:var(--font-display);letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0}
 .preview-tab.active{color:var(--yellow);border-bottom-color:var(--yellow)}
 .preview-tab.has-data{color:var(--txt-secondary)}
-.preview-content{padding:20px;min-height:200px}
-.preview-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);margin-bottom:14px;padding:6px 10px;background:var(--bg-hover);border-left:2px solid var(--border-bright)}
-.preview-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.preview-sub-title{font-family:var(--font-display);font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-muted);margin:14px 0 8px}
+.preview-content{padding:18px;min-height:180px}
+
+.preview-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);margin-bottom:12px;padding:5px 10px;background:var(--bg-hover);border-left:2px solid var(--border-bright)}
+.preview-meta strong{color:var(--yellow)}
+.preview-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.preview-sub-title{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-muted);margin:12px 0 6px}
 .preview-table{width:100%;border-collapse:collapse;font-size:12px}
-.preview-table th{text-align:left;padding:5px 8px;font-family:var(--font-display);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:1px solid var(--border-bright)}
+.preview-table th{text-align:left;padding:4px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:1px solid var(--border-bright)}
 .preview-table td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary)}
 .preview-table td:last-child{text-align:right;font-family:var(--font-mono);color:var(--txt-primary)}
 .preview-table tr.total td{color:var(--txt-primary);font-weight:600;border-top:1px solid var(--border-bright)}
-.preview-table tr.total td:last-child{font-family:var(--font-mono)}
 .preview-table tr.highlight td{color:var(--green)}
 .preview-table tr.highlight-strong td{color:var(--yellow);font-size:13px}
-.preview-table tr.sub td:first-child{color:var(--txt-muted);padding-left:20px}
-.preview-table tr.divider td{border:none;height:8px}
+.preview-table tr.sub td:first-child{color:var(--txt-muted);padding-left:18px}
+.preview-table tr.divider td{border:none;height:6px}
 .preview-table .muted{color:var(--txt-muted)!important;font-size:11px}
-.preview-kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
-.pkpi{background:var(--bg-hover);border:1px solid var(--border-bright);padding:10px 14px;min-width:130px}
-.pkpi-label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-muted);margin-bottom:4px}
-.pkpi-val{font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--txt-primary)}
-.pkpi-val.green{color:var(--green)}
-.pkpi-val.yellow{color:var(--yellow)}
-.pkpi-val.red{color:var(--red)}
-.pkpi-val.orange{color:var(--orange)}
+.preview-kpis{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.pkpi{background:var(--bg-hover);border:1px solid var(--border-bright);padding:9px 12px;min-width:120px}
+.pkpi-label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-muted);margin-bottom:3px}
+.pkpi-val{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--txt-primary)}
+.pkpi-val.green{color:var(--green)}.pkpi-val.yellow{color:var(--yellow)}.pkpi-val.red{color:var(--red)}.pkpi-val.orange{color:var(--orange)}
 
-/* COMMIT PANEL */
-.commit-panel{background:var(--bg-card);border:1px solid var(--border);border-top:2px solid var(--green);padding:20px;margin-top:20px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+/* COMMIT ────────────────────────────────────────────── */
+.commit-panel{background:var(--bg-card);border:1px solid var(--border);border-top:2px solid var(--green);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:20px;position:sticky;bottom:0;z-index:50}
 .commit-info{font-size:13px;color:var(--txt-secondary)}
 .commit-info strong{color:var(--txt-primary)}
-.commit-status{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted);margin-top:4px;min-height:18px}
-.empty-state{text-align:center;padding:40px;color:var(--txt-muted);font-size:13px}
+.commit-status{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted);margin-top:4px;min-height:16px}
+.empty-state{text-align:center;padding:30px;color:var(--txt-muted);font-size:13px}
+
+/* EXPORT HELPER ─────────────────────────────────────── */
+.export-steps{background:var(--bg-base);border:1px solid var(--border);padding:10px 14px;margin-top:6px;font-size:11px;color:var(--txt-muted);line-height:1.8;display:none}
+.export-steps.open{display:block}
+.export-steps code{font-family:var(--font-mono);color:var(--yellow);font-size:10px}
+.exp-toggle{background:none;border:none;color:var(--blue);font-size:11px;cursor:pointer;padding:0;font-family:var(--font-body)}
+.exp-toggle:hover{color:var(--txt-primary)}
+
+.loading-spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border-bright);border-top-color:var(--yellow);border-radius:50%;animation:spin .8s linear infinite;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -127,7 +175,7 @@ a{color:inherit;text-decoration:none}
   <div class="login-box">
     <div class="logo-mark" style="margin:0 auto 16px">SF</div>
     <h2>SFS Dashboard Admin</h2>
-    <p>Upload and parse QuickBooks & Knowify exports</p>
+    <p>Data management & refresh portal</p>
     <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
     <button class="btn" onclick="doLogin()">Enter</button>
     <div id="login-err" style="color:var(--red);font-size:12px;margin-top:10px"></div>
@@ -155,18 +203,38 @@ a{color:inherit;text-decoration:none}
   </header>
 
   <main class="main">
-    <div class="page-title">Data Refresh</div>
-    <div class="page-sub">Drop each QuickBooks or Knowify export below. Each file is parsed and previewed before anything is saved to Firebase.</div>
+    <div class="page-title">Data Management</div>
+    <div class="page-sub">All data requirements from Jan 1, 2020 to present. Upload files below to fill gaps.</div>
 
-    <div class="parsers-grid" id="parsers-grid"></div>
+    <!-- STATUS PANEL -->
+    <div id="status-loading" style="padding:30px;text-align:center;color:var(--txt-muted);font-size:13px">
+      <span class="loading-spinner"></span>Reading Firebase…
+    </div>
+    <div id="status-panel" style="display:none"></div>
 
-    <div class="preview-wrap">
-      <div class="preview-tabs" id="preview-tabs"></div>
-      <div class="preview-content" id="preview-content">
-        <div class="empty-state">Drop a file above to preview its parsed data here.</div>
+    <!-- UPLOAD SECTION (collapsible) -->
+    <div class="upload-section" id="upload-section">
+      <div class="upload-section-head" onclick="toggleUpload()">
+        <div>
+          <div class="section-header" style="margin:0;border:none;padding:0">
+            <span><span class="accent">◆</span> Upload Files</span>
+          </div>
+          <div style="font-size:11px;color:var(--txt-muted);margin-top:2px">Drop QuickBooks exports and Knowify XLSX to parse and preview</div>
+        </div>
+        <div class="upload-toggle" id="upload-toggle">▼ Show</div>
+      </div>
+      <div class="upload-body" id="upload-body">
+        <div class="parsers-grid" id="parsers-grid"></div>
+        <div class="preview-wrap">
+          <div class="preview-tabs" id="preview-tabs"></div>
+          <div class="preview-content" id="preview-content">
+            <div class="empty-state">Drop a file above to preview its parsed data here.</div>
+          </div>
+        </div>
       </div>
     </div>
 
+    <!-- COMMIT -->
     <div class="commit-panel">
       <div>
         <div class="commit-info"><strong id="commit-count">0 datasets</strong> ready to push to Firebase</div>
@@ -174,7 +242,7 @@ a{color:inherit;text-decoration:none}
       </div>
       <div style="display:flex;gap:10px">
         <button class="btn-outline" onclick="clearAll()">Clear All</button>
-        <button class="btn btn-green" onclick="pushToFirebase()">Push to Firebase →</button>
+        <button class="btn btn-green btn-sm" onclick="pushToFirebase()">Push to Firebase →</button>
       </div>
     </div>
   </main>
@@ -185,68 +253,382 @@ const APP_PASS = 'Semperfi3004!';
 const PARSERS = [PARSER_PL, PARSER_BS, PARSER_CF, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
 const parsedData = {};
 let activeTab = null;
+let firebaseData = {};
 
-function doLogin() {
-  const val = document.getElementById('pw-input').value;
-  if (val === APP_PASS) {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'block';
-    initApp();
-  } else {
-    document.getElementById('login-err').textContent = 'Incorrect password.';
+// ── DATA REQUIREMENTS ─────────────────────────────────────────
+// Everything starts Jan 1, 2020
+const START_YEAR = 2020;
+const CURRENT_YEAR = new Date().getFullYear();
+const TODAY = new Date().toISOString().slice(0,10);
+
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function monthName(mo) { return MONTHS_SHORT[parseInt(mo)-1] || mo; }
+
+function buildRequirements() {
+  const reqs = [];
+
+  // ── P&L: full year per year, plus YTD current year
+  for (let yr = START_YEAR; yr < CURRENT_YEAR; yr++) {
+    reqs.push({
+      id: `pl-${yr}`, dataset: 'qbo-pl', group: 'Profit & Loss',
+      label: `P&L ${yr}`, type: 'period', key: String(yr),
+      description: `Full year ${yr}`,
+      isYTD: false,
+      exportSteps: [
+        `QuickBooks → Reports → Profit and Loss`,
+        `Date range: <code>Jan 1, ${yr}</code> → <code>Dec 31, ${yr}</code>`,
+        `Accounting method: Accrual`,
+        `Export → Download as CSV`
+      ]
+    });
   }
-}
-document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
-
-function initApp() {
-  getDB().ref('.info/connected').on('value', snap => {
-    const ok = snap.val();
-    document.getElementById('status-dot').style.background = ok ? 'var(--green)' : 'var(--red)';
-    document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
+  reqs.push({
+    id: `pl-${CURRENT_YEAR}`, dataset: 'qbo-pl', group: 'Profit & Loss',
+    label: `P&L ${CURRENT_YEAR} YTD`, type: 'period', key: String(CURRENT_YEAR),
+    description: `Jan 1, ${CURRENT_YEAR} → today (refresh monthly)`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Profit and Loss`,
+      `Date range: <code>Jan 1, ${CURRENT_YEAR}</code> → <code>Today</code>`,
+      `Accounting method: Accrual`,
+      `Export → Download as CSV`
+    ]
   });
-  buildGrid();
-  buildTabs();
+
+  // ── Cash Flow: full year per year, plus YTD current year
+  for (let yr = START_YEAR; yr < CURRENT_YEAR; yr++) {
+    reqs.push({
+      id: `cf-${yr}`, dataset: 'qbo-cf', group: 'Cash Flow',
+      label: `Cash Flow ${yr}`, type: 'period', key: String(yr),
+      description: `Full year ${yr}`,
+      isYTD: false,
+      exportSteps: [
+        `QuickBooks → Reports → Statement of Cash Flows`,
+        `Date range: <code>Jan 1, ${yr}</code> → <code>Dec 31, ${yr}</code>`,
+        `Export → Download as CSV`
+      ]
+    });
+  }
+  reqs.push({
+    id: `cf-${CURRENT_YEAR}`, dataset: 'qbo-cf', group: 'Cash Flow',
+    label: `Cash Flow ${CURRENT_YEAR} YTD`, type: 'period', key: String(CURRENT_YEAR),
+    description: `Jan 1, ${CURRENT_YEAR} → today (refresh monthly)`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Statement of Cash Flows`,
+      `Date range: <code>Jan 1, ${CURRENT_YEAR}</code> → <code>Today</code>`,
+      `Export → Download as CSV`
+    ]
+  });
+
+  // ── Balance Sheet: Jan 1 snapshot for each year, plus current
+  for (let yr = START_YEAR; yr <= CURRENT_YEAR; yr++) {
+    const key = `${yr}-01-01`;
+    reqs.push({
+      id: `bs-jan-${yr}`, dataset: 'qbo-bs', group: 'Balance Sheet',
+      label: `Balance Sheet Jan 1, ${yr}`, type: 'snapshot', key,
+      description: `Opening balance for ${yr}`,
+      isYTD: false,
+      exportSteps: [
+        `QuickBooks → Reports → Balance Sheet`,
+        `As of date: <code>January 1, ${yr}</code>`,
+        `Accounting method: Accrual`,
+        `Export → Download as CSV`
+      ]
+    });
+  }
+  reqs.push({
+    id: `bs-current`, dataset: 'qbo-bs', group: 'Balance Sheet',
+    label: `Balance Sheet — Current`, type: 'snapshot', key: TODAY,
+    description: `As of today — refresh monthly`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Balance Sheet`,
+      `As of date: <code>Today</code>`,
+      `Accounting method: Accrual`,
+      `Export → Download as CSV`
+    ]
+  });
+
+  // ── Sales: everything
+  reqs.push({
+    id: `sales-all`, dataset: 'qbo-sales', group: 'Sales by Customer',
+    label: `Sales — All History`, type: 'merge',
+    description: `Jan 1, ${START_YEAR} → today, all customers`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Sales by Customer Detail`,
+      `Date range: <code>Jan 1, ${START_YEAR}</code> → <code>Today</code>`,
+      `Click Run, then Export → Download as CSV`,
+      `Note: you can upload a shorter recent range — data merges with existing`
+    ]
+  });
+
+  // ── Transactions: everything
+  reqs.push({
+    id: `txn-all`, dataset: 'qbo-transactions', group: 'Transaction Detail',
+    label: `Transaction Detail — All History`, type: 'merge',
+    description: `Jan 1, ${START_YEAR} → today, all accounts`,
+    isYTD: true,
+    exportSteps: [
+      `QuickBooks → Reports → Transaction Detail by Account`,
+      `Date range: <code>Jan 1, ${START_YEAR}</code> → <code>Today</code>`,
+      `Click Run, then Export → Download as CSV`,
+      `Note: you can upload a shorter recent range — data merges with existing`
+    ]
+  });
+
+  // ── Knowify: current export
+  reqs.push({
+    id: `knowify-current`, dataset: 'knowify-jobs', group: 'Knowify',
+    label: `Knowify — Advanced Jobs`, type: 'merge',
+    description: `All tabs (Active, Closed, Bidding, Rejected) — refresh monthly`,
+    isYTD: true,
+    exportSteps: [
+      `Knowify → Jobs → Advanced Jobs Report`,
+      `Date range: All time`,
+      `Export as XLSX`,
+      `All four tabs (Active, Rejected, Bidding, Closed) must be in the same file`
+    ]
+  });
+
+  return reqs;
+}
+
+// ── CHECK REQUIREMENTS AGAINST FIREBASE ─────────────────────────
+function checkRequirements(reqs, fbData) {
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now - 30*24*60*60*1000).toISOString().slice(0,10);
+
+  return reqs.map(req => {
+    let status = 'missing'; // 'ok' | 'stale' | 'missing'
+    let detail = '';
+    let savedAt = null;
+
+    const ds = fbData[req.dataset] || {};
+
+    if (req.type === 'period') {
+      const periods = ds.periods || {};
+      const entry = periods[req.key];
+      if (entry) {
+        savedAt = entry._savedAt || entry.meta?.parsedAt;
+        if (req.isYTD && savedAt && savedAt.slice(0,10) < thirtyDaysAgo) {
+          status = 'stale';
+          detail = `Last updated ${savedAt.slice(0,10)} — refresh recommended`;
+        } else {
+          status = 'ok';
+          detail = entry.meta?.period || req.key;
+        }
+      }
+    } else if (req.type === 'snapshot') {
+      const snapshots = ds.snapshots || {};
+      // For "current" snapshot, find most recent within ~35 days
+      if (req.id === 'bs-current') {
+        const keys = Object.keys(snapshots).sort().reverse();
+        const recent = keys.find(k => k >= thirtyDaysAgo);
+        if (recent) {
+          status = 'ok';
+          savedAt = snapshots[recent]._savedAt;
+          detail = `As of ${recent}`;
+        } else if (keys.length > 0) {
+          status = 'stale';
+          detail = `Most recent: ${keys[0]} — refresh recommended`;
+          savedAt = snapshots[keys[0]]._savedAt;
+        }
+      } else {
+        // Exact key match (allow ±1 day for Jan 1)
+        const entry = snapshots[req.key];
+        if (entry) {
+          status = 'ok';
+          savedAt = entry._savedAt || entry.meta?.parsedAt;
+          detail = entry.meta?.period || req.key;
+        }
+      }
+    } else if (req.type === 'merge') {
+      // Sales: check if we have any monthly data
+      if (req.dataset === 'qbo-sales') {
+        const monthly = ds.monthlyByYear || {};
+        const years = Object.keys(monthly).sort();
+        if (years.length) {
+          const earliest = years[0];
+          const latest = years[years.length-1];
+          const latestMonths = monthly[latest] || [];
+          const lastMonth = latestMonths.reduce((last, v, i) => v > 0 ? i : last, -1);
+          const savedAtMeta = ds.meta?.mergedAt || ds.meta?.parsedAt;
+          savedAt = savedAtMeta;
+          if (savedAtMeta && savedAtMeta.slice(0,10) < thirtyDaysAgo) {
+            status = 'stale';
+            detail = `Covers ${earliest}–${latest} · Last updated ${savedAtMeta?.slice(0,10)}`;
+          } else {
+            status = years.includes(String(START_YEAR)) ? 'ok' : 'stale';
+            detail = `Covers ${earliest} – ${MONTHS_SHORT[lastMonth]||'?'} ${latest}`;
+          }
+        }
+      } else if (req.dataset === 'qbo-transactions') {
+        const accounts = ds.accountSummary;
+        if (accounts && accounts.length) {
+          savedAt = ds.meta?.mergedAt || ds.meta?.parsedAt;
+          status = savedAt && savedAt.slice(0,10) < thirtyDaysAgo ? 'stale' : 'ok';
+          detail = `${accounts.length} accounts · Last parsed ${savedAt?.slice(0,10) || '—'}`;
+        }
+      } else if (req.dataset === 'knowify-jobs') {
+        if (ds.summary) {
+          savedAt = ds.meta?.parsedAt;
+          status = savedAt && savedAt.slice(0,10) < thirtyDaysAgo ? 'stale' : 'ok';
+          detail = `${ds.summary.activeJobs || 0} active jobs · Exported ${savedAt?.slice(0,10) || '—'}`;
+        }
+      }
+    }
+
+    return { ...req, status, detail, savedAt };
+  });
+}
+
+// ── BUILD STATUS UI ──────────────────────────────────────────
+function buildStatusPanel(checkedReqs) {
+  const groups = {};
+  checkedReqs.forEach(r => {
+    if (!groups[r.group]) groups[r.group] = [];
+    groups[r.group].push(r);
+  });
+
+  const totalOk     = checkedReqs.filter(r => r.status==='ok').length;
+  const totalStale  = checkedReqs.filter(r => r.status==='stale').length;
+  const totalMissing= checkedReqs.filter(r => r.status==='missing').length;
+
+  // Summary bar
+  let html = `
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="background:var(--bg-card);border:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--green)">${totalOk}</span>
+        <span style="font-size:12px;color:var(--txt-muted)">Up to date</span>
+      </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--orange)">${totalStale}</span>
+        <span style="font-size:12px;color:var(--txt-muted)">Need refresh</span>
+      </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--red)">${totalMissing}</span>
+        <span style="font-size:12px;color:var(--txt-muted)">Missing</span>
+      </div>
+      <div style="flex:1;min-width:200px;background:var(--bg-card);border:1px solid var(--border);padding:10px 16px;font-size:11px;color:var(--txt-muted)">
+        Data range: Jan 1, ${START_YEAR} → present &nbsp;·&nbsp; <span style="color:var(--green)">●</span> Present &nbsp;<span style="color:var(--orange)">●</span> Stale (&gt;30 days) &nbsp;<span style="color:var(--red)">●</span> Missing
+      </div>
+    </div>`;
+
+  Object.entries(groups).forEach(([groupName, items]) => {
+    const ok      = items.filter(r=>r.status==='ok').length;
+    const stale   = items.filter(r=>r.status==='stale').length;
+    const missing = items.filter(r=>r.status==='missing').length;
+
+    html += `
+    <div class="status-section">
+      <div class="status-section-head">
+        <div class="status-section-title">${groupName}</div>
+        <div class="status-counts">
+          ${ok      ? `<span class="sc-green">✓ ${ok}</span>` : ''}
+          ${stale   ? `<span class="sc-yellow">⚠ ${stale} stale</span>` : ''}
+          ${missing ? `<span class="sc-red">✗ ${missing} missing</span>` : ''}
+        </div>
+      </div>
+      <table class="status-table">
+        <thead><tr>
+          <th style="width:30%">Dataset</th>
+          <th style="width:12%">Status</th>
+          <th>Detail</th>
+          <th style="width:18%">How to export</th>
+        </tr></thead>
+        <tbody>
+          ${items.map(r => buildStatusRow(r)).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  });
+
+  return html;
+}
+
+function buildStatusRow(r) {
+  const rowCls = r.status === 'missing' ? 'missing-row' : r.status === 'stale' ? 'stale-row' : '';
+
+  const pill = r.status === 'ok'
+    ? `<span class="pill pill-green">✓ Current</span>`
+    : r.status === 'stale'
+    ? `<span class="pill pill-yellow">⚠ Stale</span>`
+    : `<span class="pill pill-red">✗ Missing</span>`;
+
+  const steps = r.exportSteps.map(s => `→ ${s}`).join('<br>');
+  const expId = `exp-${r.id}`;
+
+  return `<tr class="${rowCls}">
+    <td>
+      <div class="need-label">${r.label}</div>
+      <div class="need-sub">${r.description}</div>
+    </td>
+    <td>${pill}</td>
+    <td>
+      <div style="font-size:12px;color:${r.status==='ok'?'var(--txt-secondary)':r.status==='stale'?'var(--orange)':'var(--red)'}">
+        ${r.detail || '—'}
+      </div>
+    </td>
+    <td>
+      <button class="exp-toggle" onclick="toggleExport('${expId}')">▸ Steps</button>
+      <div class="export-steps" id="${expId}">${steps}</div>
+    </td>
+  </tr>`;
+}
+
+function toggleExport(id) {
+  const el = document.getElementById(id);
+  const btn = el.previousElementSibling;
+  const open = el.classList.toggle('open');
+  btn.textContent = open ? '▾ Steps' : '▸ Steps';
+}
+
+// ── UPLOAD SECTION ───────────────────────────────────────────
+let uploadOpen = false;
+function toggleUpload() {
+  uploadOpen = !uploadOpen;
+  document.getElementById('upload-body').classList.toggle('open', uploadOpen);
+  document.getElementById('upload-toggle').textContent = uploadOpen ? '▲ Hide' : '▼ Show';
 }
 
 function buildGrid() {
   const grid = document.getElementById('parsers-grid');
-  grid.innerHTML = PARSERS.map(p => `
+  grid.innerHTML = PARSERS.map(p => {
+    const stratColor = p.storageStrategy==='snapshot'?'var(--blue)':p.storageStrategy==='merge'?'var(--green)':'var(--yellow)';
+    return `
     <div class="parser-card" id="card-${p.id}">
       <div class="pc-header">
-        <div class="pc-title">${p.label}</div>
+        <div class="pc-title">${p.label.split('—')[1]?.trim()||p.label}</div>
         <div class="pc-hint">${p.hint}</div>
-        <div style="margin-top:5px"><span class="badge" style="font-size:9px;border-color:${p.storageStrategy==='snapshot'?'var(--blue)':p.storageStrategy==='merge'?'var(--green)':'var(--yellow)'};color:${p.storageStrategy==='snapshot'?'var(--blue)':p.storageStrategy==='merge'?'var(--green)':'var(--yellow)'}">${(p.storageStrategy||'period').toUpperCase()}</span></div>
+        <div style="margin-top:4px">
+          <span class="pill" style="border-color:${stratColor};color:${stratColor};font-size:9px">${(p.storageStrategy||'period').toUpperCase()}</span>
+        </div>
       </div>
       <div class="pc-body">
         <div class="drop-zone" id="drop-${p.id}"
           ondragover="dzOver(event,'${p.id}')" ondragleave="dzLeave('${p.id}')" ondrop="dzDrop(event,'${p.id}')">
           <input type="file" accept="${p.accept}" onchange="handleFile(this,'${p.id}')">
           <div class="drop-zone-icon">⬆</div>
-          <div class="drop-zone-text">Drop ${p.fileType.toUpperCase()} or click to browse</div>
+          <div class="drop-zone-text">Drop ${p.fileType.toUpperCase()} or click</div>
         </div>
         <div class="pc-status" id="status-${p.id}"></div>
       </div>
-    </div>`).join('');
+    </div>`}).join('');
 }
 
 function buildTabs() {
-  const tabs = document.getElementById('preview-tabs');
-  tabs.innerHTML = PARSERS.map(p =>
+  document.getElementById('preview-tabs').innerHTML = PARSERS.map(p =>
     `<div class="preview-tab" id="tab-${p.id}" onclick="showTab('${p.id}')">${p.label.split('—')[1]?.trim()||p.label}</div>`
   ).join('');
 }
 
-function dzOver(e, id) { e.preventDefault(); document.getElementById('drop-'+id).classList.add('drag-over'); }
-function dzLeave(id) { document.getElementById('drop-'+id).classList.remove('drag-over'); }
-function dzDrop(e, id) {
-  e.preventDefault();
-  dzLeave(id);
-  const file = e.dataTransfer.files[0];
-  if (file) processFile(file, id);
-}
-function handleFile(input, id) {
-  if (input.files[0]) processFile(input.files[0], id);
-}
+function dzOver(e,id){e.preventDefault();document.getElementById('drop-'+id).classList.add('drag-over')}
+function dzLeave(id){document.getElementById('drop-'+id).classList.remove('drag-over')}
+function dzDrop(e,id){e.preventDefault();dzLeave(id);const f=e.dataTransfer.files[0];if(f)processFile(f,id)}
+function handleFile(input,id){if(input.files[0])processFile(input.files[0],id)}
 
 async function processFile(file, id) {
   const parser = PARSERS.find(p => p.id === id);
@@ -264,30 +646,28 @@ async function processFile(file, id) {
     parsedData[id] = data;
     card.className = 'parser-card has-data';
     status.className = 'pc-status ok';
-    status.textContent = '✓ Parsed: ' + file.name;
+    const key = parser.getPeriodKey(data);
+    status.textContent = `✓ ${file.name} → key: ${key}`;
     document.getElementById('tab-'+id).classList.add('has-data');
     updateCommitCount();
     showTab(id);
   } catch(err) {
     card.className = 'parser-card error';
     status.className = 'pc-status err';
-    status.textContent = '✗ Error: ' + err.message;
+    status.textContent = '✗ ' + err.message;
     console.error(id, err);
   }
 }
 
 function showTab(id) {
   activeTab = id;
-  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
-  const tab = document.getElementById('tab-'+id);
-  if (tab) tab.classList.add('active');
-
+  document.querySelectorAll('.preview-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id)?.classList.add('active');
   const content = document.getElementById('preview-content');
-  const parser = PARSERS.find(p => p.id === id);
+  const parser = PARSERS.find(p=>p.id===id);
   const data = parsedData[id];
-
   if (!data) {
-    content.innerHTML = `<div class="empty-state">No data loaded for <strong>${parser.label}</strong> yet. Drop the file above.</div>`;
+    content.innerHTML = `<div class="empty-state">No data for <strong>${parser.label}</strong> yet.</div>`;
     return;
   }
   content.innerHTML = parser.renderPreview(data);
@@ -299,16 +679,17 @@ function updateCommitCount() {
 }
 
 function clearAll() {
-  Object.keys(parsedData).forEach(k => delete parsedData[k]);
-  document.querySelectorAll('.parser-card').forEach(c => c.className='parser-card');
-  document.querySelectorAll('.pc-status').forEach(s => { s.className='pc-status'; s.textContent=''; });
-  document.querySelectorAll('.drop-zone').forEach(d => d.classList.remove('has-file'));
-  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('has-data'));
-  document.getElementById('preview-content').innerHTML = '<div class="empty-state">Drop a file above to preview its parsed data here.</div>';
-  document.getElementById('commit-status').textContent = '';
+  Object.keys(parsedData).forEach(k=>delete parsedData[k]);
+  document.querySelectorAll('.parser-card').forEach(c=>c.className='parser-card');
+  document.querySelectorAll('.pc-status').forEach(s=>{s.className='pc-status';s.textContent=''});
+  document.querySelectorAll('.drop-zone').forEach(d=>d.classList.remove('has-file'));
+  document.querySelectorAll('.preview-tab').forEach(t=>t.classList.remove('has-data'));
+  document.getElementById('preview-content').innerHTML='<div class="empty-state">Drop a file above to preview.</div>';
+  document.getElementById('commit-status').textContent='';
   updateCommitCount();
 }
 
+// ── FIREBASE PUSH ────────────────────────────────────────────
 async function pushToFirebase() {
   const ids = Object.keys(parsedData);
   if (!ids.length) { alert('No data to push. Parse at least one file first.'); return; }
@@ -330,20 +711,70 @@ async function pushToFirebase() {
       } else if (strategy === 'snapshot') {
         await DB.writeSnapshot(id, key, data);
       } else if (strategy === 'merge') {
-        if (id === 'qbo-sales')         await DB.mergeSalesData(data);
+        if (id === 'qbo-sales')             await DB.mergeSalesData(data);
         else if (id === 'qbo-transactions') await DB.mergeTransactionData(data);
-        else if (id === 'knowify-jobs') await DB.mergeKnowifyData(data);
+        else if (id === 'knowify-jobs')     await DB.mergeKnowifyData(data);
         else await DB.writePeriod(id, key, data);
       }
     }
     await DB.writeMeta(ids);
     status.style.color = 'var(--green)';
-    status.textContent = '✓ All data stored — ' + new Date().toLocaleTimeString();
+    status.textContent = '✓ Pushed — ' + new Date().toLocaleTimeString();
+    // Refresh status panel
+    setTimeout(() => refreshStatusPanel(), 1500);
   } catch(err) {
     status.style.color = 'var(--red)';
-    status.textContent = '✗ Push failed: ' + err.message;
+    status.textContent = '✗ ' + err.message;
     console.error(err);
   }
+}
+
+// ── INIT ─────────────────────────────────────────────────────
+function doLogin() {
+  const val = document.getElementById('pw-input').value;
+  if (val === APP_PASS) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-screen').style.display = 'block';
+    initApp();
+  } else {
+    document.getElementById('login-err').textContent = 'Incorrect password.';
+  }
+}
+document.getElementById('pw-input').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+function initApp() {
+  getDB().ref('.info/connected').on('value', snap => {
+    const ok = snap.val();
+    document.getElementById('status-dot').style.background = ok ? 'var(--green)' : 'var(--red)';
+    document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
+  });
+
+  buildGrid();
+  buildTabs();
+
+  // Load Firebase data and build status panel
+  DB.readAll().then(data => {
+    firebaseData = data || {};
+    renderStatusPanel(firebaseData);
+  });
+
+  // Live updates to status
+  DB.onAll(data => { firebaseData = data || {}; });
+}
+
+function renderStatusPanel(fbData) {
+  document.getElementById('status-loading').style.display = 'none';
+  const panel = document.getElementById('status-panel');
+  panel.style.display = 'block';
+  const reqs = buildRequirements();
+  const checked = checkRequirements(reqs, fbData);
+  panel.innerHTML = buildStatusPanel(checked);
+}
+
+async function refreshStatusPanel() {
+  const data = await DB.readAll();
+  firebaseData = data || {};
+  renderStatusPanel(firebaseData);
 }
 </script>
 </body>
