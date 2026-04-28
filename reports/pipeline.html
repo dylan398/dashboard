@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js"></script>
+<script src="../core/utils.js"></script>
+<script src="../core/dash.js"></script>
+<script src="../core/nav.js"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--yellow-dim:#c9a02e;--orange:#e07b2b;
+  --red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
+
+/* Rules block — explains the transformation up front */
+.rules-block{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--yellow);padding:18px 22px;margin-bottom:18px}
+.rules-title{font-family:var(--font-display);font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--yellow);margin-bottom:12px}
+.rule{display:grid;grid-template-columns:170px 1fr;gap:14px;padding:7px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.rule:last-child{border-bottom:none}
+.rule-name{color:var(--txt-secondary);font-weight:600}
+.rule-name::before{content:'›';color:var(--yellow);margin-right:6px}
+.rule-text{color:var(--txt-secondary);line-height:1.5}
+.rule-text strong{color:var(--txt-primary)}
+
+/* Funnel */
+.funnel{display:flex;flex-direction:column;gap:6px;padding:10px 0}
+.funnel-step{display:grid;grid-template-columns:140px 1fr 90px;align-items:center;gap:10px;font-size:13px}
+.funnel-bar{height:24px;background:var(--bg-hover);border:1px solid var(--border);position:relative;overflow:hidden}
+.funnel-fill{height:100%;background:var(--yellow);transition:width .3s}
+.funnel-label{color:var(--txt-secondary);font-family:var(--font-display);text-transform:uppercase;letter-spacing:.04em;font-size:12px;font-weight:600}
+.funnel-value{font-family:var(--font-mono);text-align:right;font-size:13px;font-weight:600;color:var(--txt-primary)}
+.funnel-step.win .funnel-fill{background:var(--green)}
+.funnel-step.loss .funnel-fill{background:var(--red);opacity:.7}
+.funnel-step.pending .funnel-fill{background:var(--yellow)}
+.funnel-step.excluded .funnel-fill{background:var(--purple);opacity:.6}
+
+/* Tables */
+.t{width:100%;border-collapse:collapse;font-size:12px}
+.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
+.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
+.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.t td.muted{color:var(--txt-muted);font-size:11px}
+.t td .pct{display:inline-block;font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:2px;border:1px solid currentColor}
+.win-rate.high{color:var(--green)}.win-rate.mid{color:var(--yellow)}.win-rate.low{color:var(--red)}
+.t tr:hover{background:var(--bg-hover)}
+.t-scroll{max-height:480px;overflow-y:auto;background:var(--bg-card)}
+
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
+.empty-state a{color:var(--yellow)}
+
+.tag{display:inline-block;font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid;letter-spacing:.04em}
+.tag.multi{border-color:var(--purple);color:var(--purple)}
+.tag.stale{border-color:var(--orange);color:var(--orange)}
+.tag.unbilled{border-color:var(--orange);color:var(--orange)}
+
+.note{background:rgba(74,158,255,.06);border-left:2px solid var(--blue);padding:8px 12px;font-size:12px;color:var(--txt-secondary);margin-top:10px;line-height:1.5}
+.note strong{color:var(--blue)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}
+.chart-wrap.h280{height:280px}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Pipeline</div>
+  <div class="page-sub">Knowify bid pipeline with the SFS rule set applied. <span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:11px">As of <span id="as-of">—</span></span></div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    No Knowify data yet. Go to <a href="../admin.html">Admin</a> and upload an Advanced Jobs Report.
+  </div>
+
+  <div id="content" style="display:none">
+    <!-- Rules block (always visible — establishes how the data is being interpreted) -->
+    <div class="rules-block">
+      <div class="rules-title">Four rules applied to raw Knowify data</div>
+      <div class="rule"><div class="rule-name">Stale bids → losses</div><div class="rule-text">Bidding-status jobs older than <strong>120 days</strong> → loss. Awards happen in 30–60 days. Anything open after 120 days is effectively lost.</div></div>
+      <div class="rule"><div class="rule-name">Unbilled closed → losses</div><div class="rule-text">Closed with <strong>0% billed</strong> → loss. No invoice = no revenue.</div></div>
+      <div class="rule"><div class="rule-name">Relationship leads excluded</div><div class="rule-text">Jobs led by <strong>James Thetford, Tyler Petty, or Jenna Napier</strong> excluded. These are pre-sold — outcome not determined by price competitiveness.</div></div>
+      <div class="rule"><div class="rule-name">Competitive channel</div><div class="rule-text">Estimating Department, blank Sales Lead, all Rejected jobs. <strong>Used for all win-rate calculations below.</strong></div></div>
+      <div class="rule"><div class="rule-name">Multi-GC dedup noted</div><div class="rule-text" id="multi-gc-rule">— calculating —</div></div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <!-- Funnel + Sales-lead breakdown -->
+    <div class="grid-6040">
+      <div class="panel">
+        <div class="panel-title"><span>Competitive Pipeline Funnel</span><span class="meta">After rules applied</span></div>
+        <div id="funnel"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>By Sales Lead</span><span class="meta">Competitive set</span></div>
+        <div class="t-scroll"><table class="t" id="t-leads"><thead><tr><th>Lead</th><th>Bids</th><th>Wins</th><th>Win %</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Top GCs -->
+    <div class="section-label"><span><span class="accent">▸</span> General Contractors</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">competitive bids only · sorted by total bid value</span></div>
+    <div class="panel" style="padding:0">
+      <div class="t-scroll" style="max-height:520px"><table class="t" id="t-gcs"><thead><tr><th>GC</th><th>Bids</th><th>Wins</th><th>Losses</th><th>Pending</th><th>Win %</th><th>Won $</th><th>Pending $</th><th>Total bid $</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- Multi-GC projects + Stale reclassifications -->
+    <div class="section-label"><span><span class="accent">▸</span> Reclassifications & Multi-GC Projects</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Bids reclassified as losses</span><span class="meta" id="reclass-meta">—</span></div>
+        <div class="t-scroll" style="max-height:380px"><table class="t" id="t-reclass"><thead><tr><th>Why</th><th>GC</th><th>Job</th><th>Created</th><th>Days</th><th>Value</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Multi-GC projects</span><span class="meta" id="multi-meta">—</span></div>
+        <div class="t-scroll" style="max-height:380px"><table class="t" id="t-multi"><thead><tr><th>Project</th><th>GCs bid through</th><th>Total $</th><th>Won?</th></tr></thead><tbody></tbody></table></div>
+        <div class="note"><strong>Why this matters:</strong> only one GC can win the prime contract. When SFS loses these bids it's often because <em>the GC didn't win the prime</em>, not because we were outbid. Win rate by GC is still the right metric — it tells you which GCs to pursue — but the loss <em>count</em> overstates competitive losses.</div>
+      </div>
+    </div>
+
+    <!-- Relationship channel summary -->
+    <div class="section-label"><span><span class="accent">▸</span> Relationship Channel</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Excluded from win-rate calculations · pre-sold</span></div>
+    <div class="panel" id="relationship-panel"></div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('pipeline');
+setupChartTheme();
+
+loadDashboard((D, raw) => {
+  const knowify = D?.['knowify-jobs'];
+  if (!knowify || !knowify.jobs) {
+    document.getElementById('empty-state').style.display = 'block';
+    document.getElementById('content').style.display = 'none';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  const exportedDate = knowify.meta?.parsedAt?.slice(0, 10) || '—';
+  document.getElementById('as-of').textContent = exportedDate;
+
+  const result = applyKnowifyRules(knowify.jobs);
+  renderMultiGCRule(result);
+  renderKPIs(result);
+  renderFunnel(result);
+  renderLeadsTable(result);
+  renderGCsTable(result);
+  renderReclassTable(result);
+  renderMultiGCTable(result);
+  renderRelationship(result);
+});
+
+function renderMultiGCRule(r) {
+  const m = r.multiGC;
+  const c = r.competitive;
+  const pct = c.jobs.length ? ((m.bidsInMultiGCProjects / c.jobs.length) * 100).toFixed(0) : 0;
+  document.getElementById('multi-gc-rule').innerHTML =
+    `<strong>${fmtNum(m.bidsInMultiGCProjects)} bids (${pct}% of competitive)</strong> are part of <strong>${fmtNum(m.projectCount)}</strong> projects sent to multiple GCs simultaneously — ${m.avgGCsPerProject} GCs per project on average. Per-GC win rate is the right metric to evaluate which GCs to pursue, but loss counts include duplicates.`;
+}
+
+function renderKPIs(r) {
+  const c = r.competitive;
+  const winRate = c.winRate;
+  const wrColor = winRate == null ? 'orange' : winRate >= 25 ? 'green' : winRate >= 15 ? 'yellow' : 'red';
+  const dollarColor = c.dollarWinRate == null ? 'orange' : c.dollarWinRate >= 25 ? 'green' : c.dollarWinRate >= 15 ? 'yellow' : 'red';
+  const kpis = [
+    { label: 'Competitive bids', value: fmtNum(c.jobs.length), color: 'blue', sub: `${r.rawCounts.Bidding + r.rawCounts.Active + r.rawCounts.Closed + r.rawCounts.Rejected} total raw` },
+    { label: 'Win rate', value: winRate != null ? winRate + '%' : '—', color: wrColor, sub: `${c.wins} wins / ${c.losses} losses` },
+    { label: 'Dollar win rate', value: c.dollarWinRate != null ? c.dollarWinRate + '%' : '—', color: dollarColor, sub: 'Won $ / decided $' },
+    { label: 'Pending value', value: fmtK(c.pendingCV), color: 'yellow', sub: `${c.pending} pending bids` },
+    { label: 'Won contract value', value: fmtK(c.wonCV), color: 'green', sub: `${c.wins} wins` },
+    { label: 'Reclassified', value: fmtNum(c.reclassifiedStale + c.reclassifiedUnbilled), color: 'orange', sub: `${c.reclassifiedStale} stale · ${c.reclassifiedUnbilled} unbilled` },
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="kpi" style="--kpi-color:var(--${k.color})">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value ${k.color}">${k.value}</div>
+      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
+    </div>`).join('');
+}
+
+function renderFunnel(r) {
+  const c = r.competitive;
+  const total = c.jobs.length || 1;
+  const steps = [
+    { cls: '',        label: 'Total competitive', count: c.jobs.length, val: '' },
+    { cls: 'pending', label: 'Pending',           count: c.pending,     val: fmtK(c.pendingCV) },
+    { cls: 'win',     label: 'Wins',              count: c.wins,        val: fmtK(c.wonCV) },
+    { cls: 'loss',    label: 'Losses',            count: c.losses,      val: fmtK(c.lostCV) },
+  ];
+  document.getElementById('funnel').innerHTML = `<div class="funnel">${steps.map(s => `
+    <div class="funnel-step ${s.cls}">
+      <div class="funnel-label">${s.label}</div>
+      <div class="funnel-bar"><div class="funnel-fill" style="width:${(s.count/total*100).toFixed(1)}%"></div></div>
+      <div class="funnel-value">${fmtNum(s.count)} ${s.val ? '· ' + s.val : ''}</div>
+    </div>`).join('')}</div>`;
+}
+
+function renderLeadsTable(r) {
+  const tbody = document.querySelector('#t-leads tbody');
+  tbody.innerHTML = r.byLead.map(l => {
+    const wrCls = l.winRate == null ? '' : l.winRate >= 25 ? 'high' : l.winRate >= 15 ? 'mid' : 'low';
+    return `<tr>
+      <td>${l.lead}</td>
+      <td class="num">${fmtNum(l.bids)}</td>
+      <td class="num">${l.wins}</td>
+      <td class="num win-rate ${wrCls}">${l.winRate != null ? l.winRate + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderGCsTable(r) {
+  const tbody = document.querySelector('#t-gcs tbody');
+  tbody.innerHTML = r.byGC.map(g => {
+    const wrCls = g.winRate == null ? '' : g.winRate >= 25 ? 'high' : g.winRate >= 15 ? 'mid' : 'low';
+    return `<tr>
+      <td><strong>${g.gc}</strong></td>
+      <td class="num">${fmtNum(g.bids)}</td>
+      <td class="num">${g.wins}</td>
+      <td class="num">${g.losses}</td>
+      <td class="num">${g.pending}</td>
+      <td class="num win-rate ${wrCls}">${g.winRate != null ? g.winRate + '%' : '—'}</td>
+      <td class="num">${fmtK(g.wonCV)}</td>
+      <td class="num">${fmtK(g.pendingCV)}</td>
+      <td class="num">${fmtK(g.totalCV)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderReclassTable(r) {
+  const reclassified = r.competitive.jobs.filter(j => j.reclassReason);
+  document.getElementById('reclass-meta').textContent = `${reclassified.length} jobs flipped to losses`;
+  const tbody = document.querySelector('#t-reclass tbody');
+  tbody.innerHTML = reclassified.slice(0, 200).map(j => {
+    const reasonTag = j.reclassReason === 'stale-bid'
+      ? '<span class="tag stale">stale</span>'
+      : '<span class="tag unbilled">unbilled</span>';
+    return `<tr>
+      <td>${reasonTag}</td>
+      <td class="muted">${j.client || '—'}</td>
+      <td>${j.jobName || '—'}</td>
+      <td class="muted">${j.createdDate || '—'}</td>
+      <td class="num">${j.ageDays != null ? j.ageDays + 'd' : '—'}</td>
+      <td class="num">${fmtK(j.contractTotal)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--txt-muted)">No reclassifications.</td></tr>';
+}
+
+function renderMultiGCTable(r) {
+  const competitive = r.competitive.jobs;
+  // Group by normalized job name → list of bids
+  const byProject = {};
+  competitive.forEach(j => {
+    if (!j.isMultiGC) return;
+    const key = (j.jobName || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!key) return;
+    if (!byProject[key]) byProject[key] = { name: j.jobName, gcs: new Set(), totalCV: 0, wonAny: false, bids: [] };
+    byProject[key].gcs.add(j.client || '—');
+    byProject[key].totalCV += j.contractTotal || 0;
+    if (j.outcome === 'win') byProject[key].wonAny = true;
+    byProject[key].bids.push(j);
+  });
+  const projects = Object.values(byProject).sort((a, b) => b.totalCV - a.totalCV);
+  document.getElementById('multi-meta').textContent = `${projects.length} projects · ${r.multiGC.bidsInMultiGCProjects} bids`;
+  const tbody = document.querySelector('#t-multi tbody');
+  tbody.innerHTML = projects.slice(0, 200).map(p => `
+    <tr>
+      <td>${p.name}</td>
+      <td class="num">${p.gcs.size}</td>
+      <td class="num">${fmtK(p.totalCV)}</td>
+      <td class="num">${p.wonAny ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--txt-muted)">—</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="padding:30px;text-align:center;color:var(--txt-muted)">No multi-GC projects.</td></tr>';
+}
+
+function renderRelationship(r) {
+  const rel = r.relationship;
+  const el = document.getElementById('relationship-panel');
+  if (rel.bids === 0) {
+    el.innerHTML = '<div class="empty-state">No relationship-channel jobs.</div>';
+    return;
+  }
+  // Break down by lead
+  const byLead = {};
+  rel.jobs.forEach(j => {
+    const lead = j.salesLead || '—';
+    if (!byLead[lead]) byLead[lead] = { lead, bids: 0, wonCV: 0, won: 0 };
+    byLead[lead].bids++;
+    if (j.originalStatus === 'Active' || (j.originalStatus === 'Closed' && (j.invoiced || 0) > 0)) {
+      byLead[lead].won++;
+      byLead[lead].wonCV += j.contractTotal || 0;
+    }
+  });
+  const leadRows = Object.values(byLead).sort((a, b) => b.wonCV - a.wonCV).map(l =>
+    `<tr><td><strong>${l.lead}</strong></td><td class="num">${l.bids}</td><td class="num">${l.won}</td><td class="num">${fmtK(l.wonCV)}</td></tr>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px">
+      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-label">Relationship bids</div><div class="kpi-value blue">${rel.bids}</div><div class="kpi-sub">Pre-sold</div></div>
+      <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-label">Won jobs</div><div class="kpi-value green">${rel.wonCount}</div><div class="kpi-sub">&nbsp;</div></div>
+      <div class="kpi" style="--kpi-color:var(--yellow)"><div class="kpi-label">Won contract value</div><div class="kpi-value yellow">${fmtK(rel.wonCV)}</div><div class="kpi-sub">&nbsp;</div></div>
+    </div>
+    <table class="t"><thead><tr><th>Sales Lead</th><th>Total bids</th><th>Won</th><th>Won $</th></tr></thead><tbody>${leadRows}</tbody></table>`;
+}
+</script>
+</body>
+</html>
