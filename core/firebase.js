@@ -17,7 +17,17 @@ function getDB() {
   return _db;
 }
 
-// Sanitize: Firebase rejects undefined values
+// Safe Firebase key: replace characters Firebase forbids in keys.
+// Defined before sanitize() because sanitize() now uses it on every key.
+function safeKey(str) {
+  return String(str).replace(/[.$[\]#/]/g, '_').replace(/\s+/g, '_').slice(0, 768);
+}
+
+// Sanitize for Firebase write:
+// - drops undefined (Firebase rejects)
+// - safeKey()s every object key (Firebase forbids . # $ / [ ] in keys)
+//   This matters when parsers use raw QuickBooks line-item names — e.g.
+//   "Marketing Budget($3,500/mo)" — as object keys for opex/cogs maps.
 function sanitize(obj) {
   if (obj === undefined) return null;
   if (obj === null || typeof obj !== 'object') return obj;
@@ -25,14 +35,9 @@ function sanitize(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     const sv = sanitize(v);
-    if (sv !== undefined) out[k] = sv;
+    if (sv !== undefined) out[safeKey(k)] = sv;
   }
   return out;
-}
-
-// Safe Firebase key: replace characters not allowed in keys
-function safeKey(str) {
-  return String(str).replace(/[.$[\]#/]/g, '_').replace(/\s+/g, '_').slice(0, 768);
 }
 
 const DB = {
