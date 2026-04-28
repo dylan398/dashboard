@@ -4,12 +4,19 @@ const PARSER_PL = {
   fileType: 'csv',
   accept: '.csv',
   hint: 'Export: Reports → Profit and Loss → Export to CSV',
+  storageStrategy: 'period',  // one record per date range
+
+  getPeriodKey(data) {
+    // Extract year(s) from period string like "January 1-December 31, 2024"
+    const p = data.meta?.period || '';
+    const years = p.match(/\d{4}/g);
+    if (!years) return new Date().getFullYear().toString();
+    return years.length > 1 ? `${years[0]}_${years[years.length-1]}` : years[0];
+  },
 
   async parse(file) {
     const text = await file.text();
     const { meta, rows } = parseQBORows(text);
-
-    // Key lookups
     const get = (...pats) => (findRow(rows, ...pats) || {}).value;
 
     const revenue       = get('total for income', 'total income');
@@ -18,33 +25,36 @@ const PARSER_PL = {
     const opexTotal     = get('total for expenses');
     const netOpIncome   = get('net operating income');
     const netIncome     = get('net income');
-    const depreciation  = get('depreciation');
+    const depreciation  = get('depreciation') ?? null;
 
-    // COGS line items (rows between "Cost of Goods Sold" section and its Total)
     const cogsSection = findSection(rows, 'cost of goods sold', 'total for cost of goods sold');
     const cogsItems = {};
     cogsSection.filter(r => r.value != null && !r.isTotal).forEach(r => {
       cogsItems[r.name] = r.value;
     });
 
-    // OpEx line items
     const opexSection = findSection(rows, 'expenses', 'total for expenses');
     const opexItems = {};
     opexSection.filter(r => r.value != null && !r.isTotal && !r.name.startsWith('Total')).forEach(r => {
-      // Collapse "Total for Payroll Expenses" etc. into parent
       if (!r.name.startsWith('Total for')) opexItems[r.name] = (opexItems[r.name] || 0) + r.value;
     });
 
     return {
       meta: { ...meta, parsedAt: new Date().toISOString() },
-      revenue, cogsTotal, grossProfit, opexTotal, netOpIncome, netIncome, depreciation,
+      revenue: revenue ?? null,
+      cogsTotal: cogsTotal ?? null,
+      grossProfit: grossProfit ?? null,
+      opexTotal: opexTotal ?? null,
+      netOpIncome: netOpIncome ?? null,
+      netIncome: netIncome ?? null,
+      depreciation,
       grossMarginPct: revenue ? +(grossProfit / revenue * 100).toFixed(2) : null,
       netMarginPct:   revenue ? +(netIncome / revenue * 100).toFixed(2) : null,
-      ebitda: netIncome != null && depreciation != null && opexItems['Interest Paid'] != null
-        ? netIncome + depreciation + (opexItems['Interest Paid'] || 0) : null,
+      ebitda: (netIncome != null && depreciation != null)
+        ? +(netIncome + depreciation + (opexItems['Interest Paid'] || 0)).toFixed(2) : null,
       cogs: cogsItems,
       opex: opexItems,
-      rawRows: rows.map(r => ({ name: r.name, value: r.value, isTotal: r.isTotal, indent: r.indent }))
+      rawRows: rows.map(r => ({ name: r.name, value: r.value ?? null, isTotal: r.isTotal, indent: r.indent }))
     };
   },
 
@@ -59,7 +69,7 @@ const PARSER_PL = {
       row('  ' + k, v, fmtPct(v, r.revenue), 'sub')).join('');
 
     return `
-      <div class="preview-meta">${r.meta.period} · ${r.meta.basis||'Accrual'}</div>
+      <div class="preview-meta">${r.meta.period} · Accrual · Period key: <strong>${this.getPeriodKey(r)}</strong></div>
       <table class="preview-table">
         <tr><th>Line Item</th><th>Amount</th><th>% Revenue</th></tr>
         ${row('Total Revenue', r.revenue, '100%', 'total')}

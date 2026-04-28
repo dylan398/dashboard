@@ -133,8 +133,8 @@ getDB().ref('.info/connected').on('value', snap => {
   document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
 });
 
-DB.onAll(data => {
-  dbData = data || {};
+DB.onAll(rawData => {
+  dbData = rawData || {};
   if (dbData.meta) {
     const d = new Date(dbData.meta.lastUpdated);
     document.getElementById('last-updated').textContent = isNaN(d) ? dbData.meta.lastUpdated : d.toLocaleString();
@@ -143,13 +143,52 @@ DB.onAll(data => {
   buildPanels();
 });
 
+// Helpers to extract latest from each dataset type
+function getLatestPeriod(dsId) {
+  const ds = dbData[dsId] || {};
+  if (ds.periods) {
+    const key = ds.latest;
+    return key ? (ds.periods[key] || {}) : Object.values(ds.periods).sort((a,b)=>b._periodKey>a._periodKey?1:-1)[0] || {};
+  }
+  return ds; // legacy
+}
+
+function getAllPeriods(dsId) {
+  const ds = dbData[dsId] || {};
+  if (ds.periods) return Object.entries(ds.periods).sort((a,b)=>b[0]>a[0]?1:-1);
+  if (ds.revenue || ds.operatingCF) return [['legacy', ds]];
+  return [];
+}
+
+function getLatestSnapshot(dsId) {
+  const ds = dbData[dsId] || {};
+  if (ds.snapshots) {
+    const key = ds.latestDate;
+    return key ? (ds.snapshots[key] || {}) : Object.values(ds.snapshots).sort((a,b)=>b._dateKey>a._dateKey?1:-1)[0] || {};
+  }
+  return ds; // legacy
+}
+
+function getAllSnapshots(dsId) {
+  const ds = dbData[dsId] || {};
+  if (ds.snapshots) return Object.entries(ds.snapshots).sort((a,b)=>b[0]>a[0]?1:-1);
+  if (ds.totalAssets) return [['legacy', ds]];
+  return [];
+}
+
 function buildTabs() {
   document.querySelectorAll('.ds-tab').forEach(tab => {
     const ds = tab.dataset.ds;
     const key = ds === 'pl' ? 'qbo-pl' : ds;
-    const hasData = !!dbData[key] || !!dbData[ds];
+    const raw = dbData[key] || dbData[ds] || {};
+    const hasData = !!(raw.periods || raw.snapshots || raw.revenue || raw.totalAssets ||
+                      raw.operatingCF || raw.monthlyByYear || raw.accountSummary || raw.summary);
     tab.classList.toggle('empty', !hasData);
     tab.onclick = hasData ? () => showPanel(ds) : null;
+    // Add period count badge
+    const periods = raw.periods ? Object.keys(raw.periods).length :
+                    raw.snapshots ? Object.keys(raw.snapshots).length : null;
+    if (periods && periods > 1) tab.textContent = tab.textContent.split('(')[0].trim() + ` (${periods})`;
   });
 }
 
@@ -165,23 +204,23 @@ function buildPanels() {
   const container = document.getElementById('viewer-panels');
   const panels = [];
 
-  const plData = dbData['qbo-pl'];
-  if (plData) panels.push(buildPLPanel(plData));
+  const plPeriods = getAllPeriods('qbo-pl');
+  if (plPeriods.length) panels.push(buildPLPanel(plPeriods[0][1], plPeriods));
 
-  const bsData = dbData['qbo-bs'];
-  if (bsData) panels.push(buildBSPanel(bsData));
+  const bsSnapshots = getAllSnapshots('qbo-bs');
+  if (bsSnapshots.length) panels.push(buildBSPanel(bsSnapshots[0][1], bsSnapshots));
 
-  const cfData = dbData['qbo-cf'];
-  if (cfData) panels.push(buildCFPanel(cfData));
+  const cfPeriods = getAllPeriods('qbo-cf');
+  if (cfPeriods.length) panels.push(buildCFPanel(cfPeriods[0][1], cfPeriods));
 
   const salesData = dbData['qbo-sales'];
-  if (salesData) panels.push(buildSalesPanel(salesData));
+  if (salesData && salesData.monthlyByYear) panels.push(buildSalesPanel(salesData));
 
   const txnData = dbData['qbo-transactions'];
-  if (txnData) panels.push(buildTxnPanel(txnData));
+  if (txnData && txnData.accountSummary) panels.push(buildTxnPanel(txnData));
 
   const knowifyData = dbData['knowify-jobs'];
-  if (knowifyData) panels.push(buildKnowifyPanel(knowifyData));
+  if (knowifyData && knowifyData.summary) panels.push(buildKnowifyPanel(knowifyData));
 
   if (!panels.length) {
     container.innerHTML = `<div class="empty-state">No data in Firebase yet.<br>Go to <a href="admin.html">Admin</a> to upload and parse your first report.</div>`;
@@ -195,7 +234,7 @@ function buildPanels() {
   if (firstTab) showPanel(firstTab.dataset.ds);
 }
 
-function buildPLPanel(d) {
+function buildPLPanel(d, allPeriods) { allPeriods = allPeriods || [[null,d]];
   const rawRows = d.rawRows || [];
   const tableRows = rawRows.map(r => {
     const cls = r.isTotal ? 'total-row' : r.indent > 2 ? 'indent' : '';
@@ -206,7 +245,12 @@ function buildPLPanel(d) {
   return `<div class="viewer-panel" id="vp-pl">
     <div class="vp-header">
       <div class="vp-title">Profit & Loss</div>
-      <div class="vp-meta">${d.meta?.period||''} · Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <select class="period-select" onchange="switchPeriod('pl',this.value)" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:4px 8px;font-size:11px;font-family:var(--font-mono)">
+          ${allPeriods.map(([k,p])=>`<option value="${k}">${p.meta?.period||k||'unknown'}</option>`).join('')}
+        </select>
+        <div class="vp-meta">Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+      </div>
     </div>
     <div class="vp-body">
       <div class="col3" style="margin-bottom:20px">
@@ -239,7 +283,7 @@ function buildPLPanel(d) {
   </div>`;
 }
 
-function buildBSPanel(d) {
+function buildBSPanel(d, allSnapshots) { allSnapshots = allSnapshots || [[null,d]];
   const rawRows = d.rawRows || [];
   const tableRows = rawRows.map(r => {
     const cls = r.isTotal ? 'total-row' : r.indent > 2 ? 'indent' : '';
@@ -251,8 +295,13 @@ function buildBSPanel(d) {
 
   return `<div class="viewer-panel" id="vp-qbo-bs">
     <div class="vp-header">
-      <div class="vp-title">Balance Sheet</div>
-      <div class="vp-meta">${d.meta?.period||''} · Parsed ${d.meta?.parsedAt ? new Date(d.meta.parsedAt).toLocaleDateString() : ''}</div>
+      <div class="vp-title">Balance Sheet — All Snapshots (${allSnapshots.length})</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <select class="period-select" onchange="switchSnapshot('qbo-bs',this.value)" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:4px 8px;font-size:11px;font-family:var(--font-mono)">
+          ${allSnapshots.map(([k,s])=>`<option value="${k}">${s.meta?.period||k||'unknown'}</option>`).join('')}
+        </select>
+        <div class="vp-meta">${d.meta?.period||''}</div>
+      </div>
     </div>
     <div class="vp-body">
       <div class="col3" style="margin-bottom:20px">
@@ -286,13 +335,18 @@ function buildBSPanel(d) {
   </div>`;
 }
 
-function buildCFPanel(d) {
+function buildCFPanel(d, allPeriods) { allPeriods = allPeriods || [[null,d]];
   const rawRows = d.rawRows || [];
   const cfColor = v => v > 0 ? 'green' : v < 0 ? 'red' : '';
   return `<div class="viewer-panel" id="vp-qbo-cf">
     <div class="vp-header">
       <div class="vp-title">Cash Flow</div>
-      <div class="vp-meta">${d.meta?.period||''}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <select class="period-select" onchange="switchPeriod('qbo-cf',this.value)" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-secondary);padding:4px 8px;font-size:11px;font-family:var(--font-mono)">
+          ${allPeriods.map(([k,p])=>`<option value="${k}">${p.meta?.period||k||'unknown'}</option>`).join('')}
+        </select>
+        <div class="vp-meta">${d.meta?.period||''}</div>
+      </div>
     </div>
     <div class="vp-body">
       <div class="col3" style="margin-bottom:20px">
@@ -464,6 +518,29 @@ function buildKnowifyPanel(d) {
 
   // Store for later reference
   window._knowifyJobTables = jobTables;
+}
+
+function switchPeriod(dsId, key) {
+  const id = dsId === 'pl' ? 'qbo-pl' : dsId;
+  const periods = getAllPeriods(id);
+  const found = periods.find(([k]) => k === key);
+  if (!found) return;
+  const panel = document.getElementById('vp-' + dsId);
+  if (!panel) return;
+  const allPeriods = periods;
+  if (dsId === 'pl') panel.outerHTML = buildPLPanel(found[1], allPeriods);
+  else if (dsId === 'qbo-cf') panel.outerHTML = buildCFPanel(found[1], allPeriods);
+  document.getElementById('vp-' + dsId)?.classList.add('active');
+}
+
+function switchSnapshot(dsId, key) {
+  const snapshots = getAllSnapshots(dsId);
+  const found = snapshots.find(([k]) => k === key);
+  if (!found) return;
+  const panel = document.getElementById('vp-qbo-bs');
+  if (!panel) return;
+  panel.outerHTML = buildBSPanel(found[1], snapshots);
+  document.getElementById('vp-qbo-bs')?.classList.add('active');
 }
 
 function showKnowifySheet(sh) {

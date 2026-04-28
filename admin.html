@@ -215,6 +215,7 @@ function buildGrid() {
       <div class="pc-header">
         <div class="pc-title">${p.label}</div>
         <div class="pc-hint">${p.hint}</div>
+        <div style="margin-top:5px"><span class="badge" style="font-size:9px;border-color:${p.storageStrategy==='snapshot'?'var(--blue)':p.storageStrategy==='merge'?'var(--green)':'var(--yellow)'};color:${p.storageStrategy==='snapshot'?'var(--blue)':p.storageStrategy==='merge'?'var(--green)':'var(--yellow)'}">${(p.storageStrategy||'period').toUpperCase()}</span></div>
       </div>
       <div class="pc-body">
         <div class="drop-zone" id="drop-${p.id}"
@@ -308,18 +309,6 @@ function clearAll() {
   updateCommitCount();
 }
 
-function sanitize(obj) {
-  // Firebase rejects undefined — convert to null recursively
-  if (obj === undefined) return null;
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(sanitize);
-  const out = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) out[k] = sanitize(v);
-  }
-  return out;
-}
-
 async function pushToFirebase() {
   const ids = Object.keys(parsedData);
   if (!ids.length) { alert('No data to push. Parse at least one file first.'); return; }
@@ -330,16 +319,26 @@ async function pushToFirebase() {
 
   try {
     for (const id of ids) {
-      status.textContent = 'Writing ' + id + '…';
-      await DB.write(id, sanitize(parsedData[id]));
+      const parser = PARSERS.find(p => p.id === id);
+      const data = parsedData[id];
+      const strategy = parser.storageStrategy || 'period';
+      const key = parser.getPeriodKey(data);
+      status.textContent = `Writing ${id} (${strategy}: ${key})…`;
+
+      if (strategy === 'period') {
+        await DB.writePeriod(id, key, data);
+      } else if (strategy === 'snapshot') {
+        await DB.writeSnapshot(id, key, data);
+      } else if (strategy === 'merge') {
+        if (id === 'qbo-sales')         await DB.mergeSalesData(data);
+        else if (id === 'qbo-transactions') await DB.mergeTransactionData(data);
+        else if (id === 'knowify-jobs') await DB.mergeKnowifyData(data);
+        else await DB.writePeriod(id, key, data);
+      }
     }
-    await DB.write('meta', {
-      lastUpdated: new Date().toISOString(),
-      datasets: ids,
-      updatedBy: 'admin'
-    });
+    await DB.writeMeta(ids);
     status.style.color = 'var(--green)';
-    status.textContent = '✓ All data pushed successfully — ' + new Date().toLocaleTimeString();
+    status.textContent = '✓ All data stored — ' + new Date().toLocaleTimeString();
   } catch(err) {
     status.style.color = 'var(--red)';
     status.textContent = '✗ Push failed: ' + err.message;

@@ -168,16 +168,53 @@ getDB().ref('.info/connected').on('value', snap => {
   document.getElementById('status-label').textContent = ok ? 'Live' : 'Offline';
 });
 
-DB.onAll(data => {
-  if (!data || !Object.keys(data).filter(k=>k!=='meta').length) {
+DB.onAll(rawData => {
+  if (!rawData || !Object.keys(rawData).filter(k=>k!=='meta').length) {
     document.getElementById('empty-state').innerHTML =
       `No data yet. Go to <a href="admin.html">Admin</a> to upload your first report.`;
     return;
   }
-  renderDashboard(data);
+  // Normalize data: extract "latest" from each dataset's storage structure
+  const data = normalizeDashboardData(rawData);
+  renderDashboard(data, rawData);
 });
 
-function renderDashboard(D) {
+function normalizeDashboardData(raw) {
+  const out = { meta: raw.meta || {} };
+
+  // Period datasets: read latest period
+  ['qbo-pl','qbo-cf'].forEach(id => {
+    const ds = raw[id] || {};
+    if (ds.periods) {
+      const latestKey = ds.latest;
+      out[id] = latestKey ? (ds.periods[latestKey] || {}) : Object.values(ds.periods||{}).sort((a,b)=>(b._periodKey||'')>(a._periodKey||'')?1:-1)[0] || {};
+    } else if (ds.revenue || ds.operatingCF) {
+      out[id] = ds; // legacy flat structure
+    } else {
+      out[id] = {};
+    }
+  });
+
+  // Snapshot dataset: read latest snapshot
+  const bsRaw = raw['qbo-bs'] || {};
+  if (bsRaw.snapshots) {
+    const latestKey = bsRaw.latestDate;
+    out['qbo-bs'] = latestKey ? (bsRaw.snapshots[latestKey] || {}) : Object.values(bsRaw.snapshots||{}).sort((a,b)=>(b._dateKey||'')>(a._dateKey||'')?1:-1)[0] || {};
+  } else if (bsRaw.totalAssets) {
+    out['qbo-bs'] = bsRaw;
+  } else {
+    out['qbo-bs'] = {};
+  }
+
+  // Merge datasets: already flat (mergeSalesData writes directly)
+  out['qbo-sales'] = raw['qbo-sales'] || {};
+  out['qbo-transactions'] = raw['qbo-transactions'] || {};
+  out['knowify-jobs'] = raw['knowify-jobs'] || {};
+
+  return out;
+}
+
+function renderDashboard(D, rawData) {
   const pl = D['qbo-pl'] || {};
   const bs = D['qbo-bs'] || {};
   const cf = D['qbo-cf'] || {};

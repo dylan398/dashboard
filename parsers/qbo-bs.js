@@ -4,11 +4,24 @@ const PARSER_BS = {
   fileType: 'csv',
   accept: '.csv',
   hint: 'Export: Reports → Balance Sheet → Export to CSV',
+  storageStrategy: 'snapshot',  // every as-of date preserved forever
+
+  getPeriodKey(data) {
+    // "As of Apr 21, 2026" → "2026-04-21"
+    const p = data.meta?.period || '';
+    const m = p.match(/(\w+)\s+(\d+),?\s+(\d{4})/);
+    if (!m) return new Date().toISOString().slice(0, 10);
+    const months = {January:'01',February:'02',March:'03',April:'04',May:'05',June:'06',
+      July:'07',August:'08',September:'09',October:'10',November:'11',December:'12',
+      Jan:'01',Feb:'02',Mar:'03',Apr:'04',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+    const mo = months[m[1]] || '01';
+    return `${m[3]}-${mo}-${String(m[2]).padStart(2,'0')}`;
+  },
 
   async parse(file) {
     const text = await file.text();
     const { meta, rows } = parseQBORows(text);
-    const get = (...pats) => (findRow(rows, ...pats) || {}).value;
+    const get = (...pats) => (findRow(rows, ...pats) || {}).value ?? null;
 
     const totalAssets          = get('total for assets', 'total assets');
     const totalCurrentAssets   = get('total for current assets');
@@ -26,26 +39,16 @@ const PARSER_BS = {
     const netIncome            = get('net income');
     const retainedEarnings     = get('retained earnings');
 
-    // Long-term debt detail (notes payable)
     const ltSection = findSection(rows, 'long-term liabilities', 'total for long-term');
     const ltDebts = ltSection
       .filter(r => r.value != null && !r.isTotal && !r.name.startsWith('Total'))
       .map(r => ({ name: r.name, amount: r.value }))
       .filter(r => r.amount !== 0);
 
-    // Credit card detail
-    const ccSection = findSection(rows, 'credit cards', 'total for credit cards');
-    const creditCardItems = {};
-    ccSection.filter(r => r.value != null && !r.isTotal).forEach(r => {
-      if (!r.name.startsWith('Total')) creditCardItems[r.name] = r.value;
-    });
-
     const workingCapital = (totalCurrentAssets != null && totalCurrentLiab != null)
-      ? totalCurrentAssets - totalCurrentLiab : null;
+      ? +(totalCurrentAssets - totalCurrentLiab).toFixed(2) : null;
     const currentRatio = (totalCurrentAssets && totalCurrentLiab)
       ? +(totalCurrentAssets / totalCurrentLiab).toFixed(2) : null;
-    const dso = (ar && get('total for income'))
-      ? Math.round(ar / (get('total for income') / 365)) : null;
 
     return {
       meta: { ...meta, parsedAt: new Date().toISOString() },
@@ -54,21 +57,21 @@ const PARSER_BS = {
       totalEquity, netIncome, retainedEarnings,
       workingCapital, currentRatio,
       ltDebts,
-      creditCardItems,
-      rawRows: rows.map(r => ({ name: r.name, value: r.value, isTotal: r.isTotal, indent: r.indent }))
+      rawRows: rows.map(r => ({ name: r.name, value: r.value ?? null, isTotal: r.isTotal, indent: r.indent }))
     };
   },
 
   renderPreview(data) {
     const d = data;
+    const key = this.getPeriodKey(d);
     const row = (label, val, cls='') =>
       `<tr class="${cls}"><td>${label}</td><td>${val != null ? fmt(val) : '—'}</td></tr>`;
 
-    const debtRows = (d.ltDebts||[]).map(dt =>
-      row('  ' + dt.name, dt.amount, 'sub')).join('');
+    const debtRows = (d.ltDebts||[]).filter(x=>x.amount!==0).map(dt =>
+      row('  '+dt.name, dt.amount, 'sub')).join('');
 
     return `
-      <div class="preview-meta">${d.meta.period} · ${d.meta.basis||'Accrual'}</div>
+      <div class="preview-meta">${d.meta.period} · Snapshot key: <strong>${key}</strong> · Will be stored permanently</div>
       <div class="preview-cols">
         <div>
           <table class="preview-table">
@@ -91,9 +94,8 @@ const PARSER_BS = {
             ${row('Long-Term Debt', d.longTermLiab)}
             ${debtRows}
             ${row('Total Liabilities', d.totalLiabilities, 'total')}
-            ${row('Total Equity', d.totalEquity, 'total')}
-            ${row('Net Income (YTD)', d.netIncome)}
-            ${row('Liab. + Equity', d.totalAssets, 'total highlight-strong')}
+            ${row('Total Equity', d.totalEquity)}
+            ${row('Total Liab. + Equity', d.totalAssets, 'total highlight-strong')}
           </table>
         </div>
       </div>
