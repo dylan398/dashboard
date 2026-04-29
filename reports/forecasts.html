@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<!--
+  Forecasts — unified financial forecast.
+
+  ▶ Read docs/CONTEXT.md §8.0 (Actionability Rule) before editing.
+
+    Combines three forecast surfaces:
+    1. AR collections forecast — open invoices × per-client DSO
+       (computed from qbo-transactions; falls back to dso-reference.js).
+    2. Pipeline-to-revenue — Knowify pending bids × historical $-win rate,
+       lagged by bid-to-revenue median + portfolio DSO to estimate when
+       cash actually lands.
+    3. Financial projection — next-12-month revenue/GP/OpEx/NI built from
+       last complete year's monthly shape × current YoY pace.
+
+    These three are forecasts (planning inputs), not alarms. Don't add
+    "chase customer" or "raise these collections" framing. SFS doesn't
+    control when AR pays and bids every job they can — see CONTEXT.md §8.0.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Forecasts</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js?v=12"></script>
+<script src="../core/utils.js?v=12"></script>
+<script src="../core/gc-segmentation.js?v=12"></script>
+<script src="../core/dso-reference.js?v=12"></script>
+<script src="../core/dash.js?v=12"></script>
+<script src="../core/nav.js?v=12"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:16px}
+.page-note{background:var(--bg-card);border-left:3px solid var(--blue);padding:11px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:24px;line-height:1.55}
+.page-note b{color:var(--txt-primary)}
+.page-note code{background:var(--bg-hover);padding:1px 5px;border-radius:2px;font-family:var(--font-mono);font-size:11px}
+
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+.section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
+
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1;color:var(--txt-primary)}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.blue{color:var(--blue)}.kpi-value.orange{color:var(--orange)}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px;margin-bottom:14px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono);text-transform:none;letter-spacing:.04em;font-weight:400}
+.panel-body{color:var(--txt-secondary);font-size:13px;line-height:1.55}
+.panel-body b{color:var(--txt-primary)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}.chart-wrap.h360{height:360px}
+
+.t{width:100%;border-collapse:collapse;font-size:12.5px}
+.t th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
+.t th.num,.t td.num{text-align:right;font-family:var(--font-mono)}
+.t td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary)}
+.t tr:hover td{background:var(--bg-hover)}
+.t .num.green{color:var(--green)}.t .num.yellow{color:var(--yellow)}.t .num.blue{color:var(--blue)}.t .num.orange{color:var(--orange)}.t .num.muted{color:var(--txt-muted)}
+
+.empty{color:var(--txt-muted);font-style:italic;padding:32px;text-align:center}
+.cap{font-size:11px;color:var(--txt-muted);margin-top:8px;line-height:1.55;font-style:italic}
+
+.flow-grid{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:14px;align-items:center;margin:18px 0}
+.flow-card{background:var(--bg-panel);border:1px solid var(--border);padding:14px}
+.flow-card .lbl{font-family:var(--font-display);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:8px}
+.flow-card .val{font-family:var(--font-mono);font-size:18px;font-weight:600;color:var(--txt-primary)}
+.flow-card .sub{font-size:11px;color:var(--txt-muted);margin-top:4px}
+.flow-arrow{font-family:var(--font-display);font-size:24px;color:var(--yellow)}
+
+.bucket-row{display:grid;grid-template-columns:120px 1fr 100px 100px 100px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+.bucket-row:last-child{border-bottom:none}
+.bucket-row .lbl{font-family:var(--font-display);text-transform:uppercase;font-size:11px;letter-spacing:.06em;color:var(--txt-secondary)}
+.bucket-row .bar{height:18px;background:var(--bg-hover);border:1px solid var(--border);position:relative;overflow:hidden}
+.bucket-row .bar-ar{height:100%;background:var(--yellow);float:left}
+.bucket-row .bar-pl{height:100%;background:var(--blue);float:left}
+.bucket-row .v{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
+.bucket-row .v.muted{color:var(--txt-muted)}
+
+.legend{display:flex;gap:14px;font-size:11px;color:var(--txt-muted);margin-top:6px}
+.legend-dot{display:inline-block;width:10px;height:10px;border-radius:1px;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Forecasts</div>
+  <div class="page-sub">Unified financial forecast — AR collections, pipeline-to-revenue, and 12-month projection. Planning inputs, not alarms.</div>
+
+  <div class="page-note">
+    <b>How the three forecasts interact:</b><br>
+    • <b>AR forecast</b> tracks already-invoiced money — for each open invoice, expected pay date = invoice date + that customer's median DSO (auto-computed from QBO Transaction Detail).<br>
+    • <b>Pipeline forecast</b> turns Knowify pending bids into expected new revenue — pending CV × historical $-win rate. Then <b>lagged by</b> bid-to-revenue median (when bids actually convert to invoices) + portfolio DSO (when invoices become cash).<br>
+    • <b>Financial projection</b> extrapolates next-12-month revenue from last complete year's monthly shape × current YoY pace. Holds OpEx at last-year monthly average and gross margin at last-year actual.<br>
+    The combined cash-inflow forecast adds AR + pipeline expected cash by 30/60/90/120-day bucket. Pipeline lands later because of the bid→invoice→cash chain.
+  </div>
+
+  <div id="empty-state" class="empty" style="display:none">
+    Need at least Open Invoices, Knowify, and one complete year of P&L to render forecasts.
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <!-- ═══════ INTERACTION FLOW ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>How the forecasts interact</span><span class="hint">Pipeline → AR → Cash</span></div>
+    <div class="panel">
+      <div class="panel-title">Cash-Generation Chain <span class="meta" id="lag-meta">—</span></div>
+      <div class="flow-grid">
+        <div class="flow-card">
+          <div class="lbl">Pending bids (Knowify)</div>
+          <div class="val" id="flow-pending">—</div>
+          <div class="sub" id="flow-pending-sub">—</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-card">
+          <div class="lbl">Open AR (already invoiced)</div>
+          <div class="val" id="flow-ar">—</div>
+          <div class="sub" id="flow-ar-sub">—</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-card">
+          <div class="lbl">Cash within 90 days</div>
+          <div class="val" id="flow-cash">—</div>
+          <div class="sub" id="flow-cash-sub">—</div>
+        </div>
+      </div>
+      <div class="cap" id="flow-cap">—</div>
+    </div>
+
+    <!-- ═══════ COMBINED CASH-INFLOW BUCKETS ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>Combined cash inflow by bucket</span><span class="hint">AR (already invoiced) + Pipeline (expected wins, lagged)</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>By Time-to-Cash Bucket</span><span class="meta">stacked AR + pipeline</span></div>
+        <div id="bucket-block"></div>
+        <div class="legend">
+          <span><span class="legend-dot" style="background:var(--yellow)"></span>AR (open invoices)</span>
+          <span><span class="legend-dot" style="background:var(--blue)"></span>Pipeline (expected wins, lagged)</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Cash Inflow Curve</span><span class="meta">$ landing by bucket</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-buckets"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════ AR COLLECTIONS DETAIL ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>AR collections detail</span><span class="hint">Per-customer DSO × open invoices</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Confidence Breakdown</span><span class="meta" id="dso-source">—</span></div>
+        <div id="ar-confidence"></div>
+        <div class="cap">Customers with ≥3 paid invoices in history get a client-specific estimate. Below that, the portfolio median is used as a soft prior. Customers with no history fall back to portfolio prior entirely. The dashboard does not generate "chase these" alarms — SFS doesn't control payment timing.</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Soonest Expected Payments</span><span class="meta">top 15 by remaining days</span></div>
+        <div style="overflow:auto;max-height:340px"><table class="t" id="t-soonest"><thead><tr><th>Customer</th><th class="num">Amount</th><th class="num">Days open</th><th class="num">Expected</th><th class="num">Conf.</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ═══════ PIPELINE DETAIL ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>Pipeline-to-revenue detail</span><span class="hint">Knowify rules applied</span></div>
+    <div class="panel">
+      <div class="panel-title"><span>From Bid to Cash</span><span class="meta">competitive funnel only</span></div>
+      <div id="pipeline-detail"></div>
+    </div>
+
+    <!-- ═══════ 12-MONTH PROJECTION ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>12-month financial projection</span><span class="hint">prior-year monthly shape × current YoY pace</span></div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Projected Revenue · GP · NI</span><span class="meta" id="proj-base">—</span></div>
+        <div class="chart-wrap h360"><canvas id="chart-proj"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Assumptions & Summary</span></div>
+        <div id="proj-summary"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Month-by-Month</span><span class="meta">12 months forward</span></div>
+      <div style="overflow:auto;max-height:420px"><table class="t" id="t-proj"><thead><tr><th>Month</th><th class="num">Revenue</th><th class="num">COGS</th><th class="num">Gross Profit</th><th class="num">OpEx</th><th class="num">Net Income</th><th>Source</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('forecasts');
+setupChartTheme();
+
+let charts = {};
+
+loadDashboard((D, raw) => {
+  const hasOI = !!D?.['qbo-open-invoices']?.invoices?.length;
+  const hasKnowify = !!D?.['knowify-jobs']?.jobs;
+  const hasPL = !!D?.['qbo-pl_all'] && Object.keys(D['qbo-pl_all']).length > 0;
+  if (!hasOI && !hasKnowify && !hasPL) {
+    document.getElementById('empty-state').style.display = 'block';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  renderKPIs(D);
+  renderFlow(D);
+  renderBuckets(D);
+  renderARConfidence(D);
+  renderSoonest(D);
+  renderPipelineDetail(D);
+  renderProjection(D);
+});
+
+function renderKPIs(D) {
+  const u = unifiedCashInflowForecast(D);
+  const fc = u?.ar;
+  const pp = u?.pipeline;
+  const proj = financialProjection(D);
+  const portfolio = dsoPortfolioSummary(D);
+
+  const kpi = (label, value, opts = {}) => `
+    <div class="kpi" style="--kpi-color:var(--${opts.color || 'border-bright'})">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${opts.color || ''}">${value}</div>
+      <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
+    </div>`;
+
+  document.getElementById('kpi-row').innerHTML = [
+    kpi('Open AR', fc ? fmtK(fc.totalOpen) : '—',
+      { color: 'yellow', sub: fc ? `${fc.invoiceCount} invoices` : 'no open invoices' }),
+    kpi('Expected ≤30d', u ? fmtK(u.buckets[0].total) : '—',
+      { color: 'green', sub: u ? `AR ${fmtK(u.buckets[0].ar)} · pipeline ${fmtK(u.buckets[0].pipeline)}` : '' }),
+    kpi('Expected 31–90d', u ? fmtK((u.buckets[1].total||0) + (u.buckets[2].total||0)) : '—',
+      { color: 'blue', sub: u ? `bridge cash` : '' }),
+    kpi('Pipeline expected', pp?.expectedWinValue != null ? fmtK(pp.expectedWinValue) : '—',
+      { color: 'blue', sub: pp ? `lag ${pp.expectedCashLanding}d → cash` : 'no pipeline data' }),
+    kpi('12-mo projection', proj ? fmtK(proj.summary.totalRevenue) : '—',
+      { color: 'yellow', sub: proj ? `NI ${fmtK(proj.summary.totalNI)} @ ${proj.assumptions.yoyPaceRatio}× pace` : 'need full year + monthly' }),
+  ].join('');
+}
+
+function renderFlow(D) {
+  const u = unifiedCashInflowForecast(D);
+  if (!u) return;
+  const fc = u.ar, pp = u.pipeline;
+  document.getElementById('flow-pending').textContent = pp ? fmtK(pp.pendingCV) : '—';
+  document.getElementById('flow-pending-sub').textContent = pp ? `${pp.dollarWinRate}% historical $-win rate → ${fmtK(pp.expectedWinValue)} expected` : 'no pipeline data';
+  document.getElementById('flow-ar').textContent = fc ? fmtK(fc.totalOpen) : '—';
+  document.getElementById('flow-ar-sub').textContent = fc ? `${fc.invoiceCount} open invoices` : '—';
+  const cash30plus60 = (u.buckets[0].total || 0) + (u.buckets[1].total || 0);
+  const cash90 = cash30plus60 + (u.buckets[2].total || 0);
+  document.getElementById('flow-cash').textContent = fmtK(cash90);
+  document.getElementById('flow-cash-sub').textContent = `0–90 days · combined AR + pipeline`;
+  if (pp) {
+    document.getElementById('lag-meta').textContent = `bid → award lag: ${pp.lagDays}d · DSO: ${pp.dsoDays}d · total bid-to-cash: ${pp.expectedCashLanding}d`;
+  }
+  document.getElementById('flow-cap').textContent = pp
+    ? `Pipeline cash lands roughly ${pp.expectedCashLanding} days from today: ${pp.lagDays}d to convert a winning bid into an invoice (Knowify median for completed bids), plus ${pp.dsoDays}d portfolio DSO until that invoice gets paid. Open AR is already on the books — it lands sooner.`
+    : '';
+}
+
+function renderBuckets(D) {
+  const u = unifiedCashInflowForecast(D);
+  if (!u) return;
+  const total = Math.max(1, u.buckets.reduce((s, b) => s + b.total, 0));
+  const buckets = u.buckets;
+  document.getElementById('bucket-block').innerHTML = buckets.map(b => {
+    const arPct = b.total > 0 ? (b.ar / total * 100) : 0;
+    const plPct = b.total > 0 ? (b.pipeline / total * 100) : 0;
+    return `<div class="bucket-row">
+      <div class="lbl">${b.label}</div>
+      <div class="bar"><div class="bar-ar" style="width:${arPct}%"></div><div class="bar-pl" style="width:${plPct}%"></div></div>
+      <div class="v">${b.total > 0 ? fmtK(b.ar) : '—'}</div>
+      <div class="v">${b.total > 0 ? fmtK(b.pipeline) : '—'}</div>
+      <div class="v">${b.total > 0 ? fmtK(b.total) : '—'}</div>
+    </div>`;
+  }).join('') + `<div class="bucket-row" style="border-top:1px solid var(--border-bright);margin-top:4px">
+    <div class="lbl" style="color:var(--txt-primary);font-weight:700">Total</div>
+    <div></div>
+    <div class="v">${fmtK(u.totals.ar)}</div>
+    <div class="v">${fmtK(u.totals.pipeline)}</div>
+    <div class="v" style="color:var(--yellow);font-weight:700">${fmtK(u.totals.combined)}</div>
+  </div>`;
+
+  // Stacked bar chart
+  const ctx = document.getElementById('chart-buckets');
+  if (charts.buckets) charts.buckets.destroy();
+  charts.buckets = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [
+        { label: 'AR (open invoices)', data: buckets.map(b => b.ar),
+          backgroundColor: CHART_COLORS.yellow + 'aa', borderColor: CHART_COLORS.yellow, borderWidth: 1, stack: 'cash' },
+        { label: 'Pipeline (expected, lagged)', data: buckets.map(b => b.pipeline),
+          backgroundColor: CHART_COLORS.blue + 'aa', borderColor: CHART_COLORS.blue, borderWidth: 1, stack: 'cash' },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+}
+
+function renderARConfidence(D) {
+  const fc = forecastCollections(D);
+  const portfolio = dsoPortfolioSummary(D);
+  const sourceLabel = portfolio?.source === 'computed-from-transactions'
+    ? `auto-computed · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
+    : portfolio?.source === 'static-baseline'
+      ? `static baseline · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
+      : 'no DSO history';
+  document.getElementById('dso-source').textContent = sourceLabel;
+  if (!fc) {
+    document.getElementById('ar-confidence').innerHTML = '<div class="empty">No open invoices.</div>';
+    return;
+  }
+  const total = Math.max(1, fc.totalOpen);
+  const c = fc.confidenceBreakdown;
+  document.getElementById('ar-confidence').innerHTML = `
+    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
+      <div class="lbl" style="color:var(--green)">Client history</div>
+      <div class="bar"><div class="bar-ar" style="width:${(c.clientHistory/total*100).toFixed(1)}%;background:var(--green)"></div></div>
+      <div class="v">${(c.clientHistory/total*100).toFixed(0)}%</div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
+      <div class="lbl" style="color:var(--yellow)">Low sample (n&lt;3)</div>
+      <div class="bar"><div class="bar-ar" style="width:${(c.lowSample/total*100).toFixed(1)}%;background:var(--yellow)"></div></div>
+      <div class="v">${(c.lowSample/total*100).toFixed(0)}%</div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
+      <div class="lbl" style="color:var(--orange)">Portfolio prior</div>
+      <div class="bar"><div class="bar-ar" style="width:${(c.portfolioFallback/total*100).toFixed(1)}%;background:var(--orange)"></div></div>
+      <div class="v">${(c.portfolioFallback/total*100).toFixed(0)}%</div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
+      <div class="lbl" style="color:var(--txt-muted)">Unknown</div>
+      <div class="bar"><div class="bar-ar" style="width:${(c.unknown/total*100).toFixed(1)}%;background:var(--txt-muted)"></div></div>
+      <div class="v">${(c.unknown/total*100).toFixed(0)}%</div>
+    </div>`;
+}
+
+function renderSoonest(D) {
+  const fc = forecastCollections(D);
+  const tbody = document.querySelector('#t-soonest tbody');
+  if (!fc?.topExpectedSoonest?.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">No invoices with estimates.</td></tr>';
+    return;
+  }
+  const rows = fc.topExpectedSoonest.slice(0, 15);
+  tbody.innerHTML = rows.map(({ inv, est }) => {
+    if (!est) return `<tr><td>${inv.customer || '—'}</td><td class="num">${fmtK(inv.openBalance)}</td><td class="num muted">—</td><td class="num muted">no estimate</td><td class="num muted">—</td></tr>`;
+    const confLabel = est.confidence === 'client-history' ? `client n=${est.nPaid}`
+                    : est.confidence === 'low-sample'     ? `low (n=${est.nPaid})`
+                    : est.confidence === 'portfolio-fallback' ? 'portfolio'
+                    : '—';
+    const confClass = est.confidence === 'client-history' ? 'green'
+                    : est.confidence === 'low-sample'     ? 'yellow'
+                    : 'orange';
+    return `<tr>
+      <td>${est.customer || inv.customer}</td>
+      <td class="num">${fmtK(est.amount)}</td>
+      <td class="num">${est.daysOpen}d</td>
+      <td class="num"><span class="muted">${est.expectedPayDate}</span><br><span style="font-size:10px;color:${est.isLate ? 'var(--orange)' : 'var(--txt-muted)'}">${est.isLate ? 'past expected' : '~' + est.remainingDays + 'd'}</span></td>
+      <td class="num ${confClass}">${confLabel}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPipelineDetail(D) {
+  const u = unifiedCashInflowForecast(D);
+  const pp = u?.pipeline;
+  const el = document.getElementById('pipeline-detail');
+  if (!pp) {
+    el.innerHTML = '<div class="empty">No Knowify pipeline data.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="grid-3">
+      <div class="flow-card">
+        <div class="lbl">Step 1 · Pending bid value</div>
+        <div class="val">${fmtK(pp.pendingCV)}</div>
+        <div class="sub">live competitive funnel</div>
+      </div>
+      <div class="flow-card">
+        <div class="lbl">Step 2 · Historical $-win rate</div>
+        <div class="val" style="color:var(--blue)">${pp.dollarWinRate}%</div>
+        <div class="sub">won $ ÷ (won + lost $)</div>
+      </div>
+      <div class="flow-card">
+        <div class="lbl">Step 3 · Expected wins</div>
+        <div class="val" style="color:var(--green)">${fmtK(pp.expectedWinValue)}</div>
+        <div class="sub">pending × win rate</div>
+      </div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr;border-top:1px solid var(--border-bright);margin-top:14px;padding-top:10px">
+      <div class="lbl">Bid → invoice lag</div>
+      <div class="v" style="text-align:left">${pp.lagDays} days <span class="muted">(median time-to-award from Knowify completed bids)</span></div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr">
+      <div class="lbl">Invoice → cash lag</div>
+      <div class="v" style="text-align:left">${pp.dsoDays} days <span class="muted">(portfolio median DSO)</span></div>
+    </div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr">
+      <div class="lbl" style="color:var(--yellow);font-weight:700">Total bid → cash</div>
+      <div class="v" style="text-align:left;color:var(--yellow);font-weight:700">${pp.expectedCashLanding} days</div>
+    </div>`;
+}
+
+function renderProjection(D) {
+  const proj = financialProjection(D);
+  const el = document.getElementById('proj-summary');
+  const tbody = document.querySelector('#t-proj tbody');
+  if (!proj) {
+    el.innerHTML = '<div class="empty">Need at least one complete year of P&L plus monthly sales-by-customer history.</div>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">—</td></tr>';
+    if (charts.proj) charts.proj.destroy();
+    return;
+  }
+  document.getElementById('proj-base').textContent = `base year ${proj.assumptions.baseYear} · pace ${proj.assumptions.yoyPaceRatio}×`;
+  el.innerHTML = `
+    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Base-year shape</div><div class="v" style="text-align:left">${proj.assumptions.baseYear} monthly</div></div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">YoY pace ratio</div><div class="v" style="text-align:left">${proj.assumptions.yoyPaceRatio}× <span class="muted">(${(proj.assumptions.yoyPaceRatio*100-100).toFixed(1)}%)</span></div></div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Held GM%</div><div class="v" style="text-align:left">${proj.assumptions.gmPct}%</div></div>
+    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Held monthly OpEx</div><div class="v" style="text-align:left">${fmtK(proj.assumptions.opexMonthly)}</div></div>
+    <div style="border-top:1px solid var(--border-bright);margin-top:10px;padding-top:10px">
+      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo Revenue</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalRevenue)}</div></div>
+      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo GP</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalGP)}</div></div>
+      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo OpEx</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalOpEx)}</div></div>
+      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl" style="color:var(--yellow);font-weight:700">12-mo Net Income</div><div class="v" style="text-align:left;color:${proj.summary.totalNI >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${fmtK(proj.summary.totalNI)}</div></div>
+    </div>
+    <div class="cap" style="margin-top:10px">${proj.assumptions.sourceNotes.join(' ')}</div>`;
+
+  // Chart
+  const ctx = document.getElementById('chart-proj');
+  if (charts.proj) charts.proj.destroy();
+  charts.proj = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: proj.months.map(m => m.label),
+      datasets: [
+        { label: 'Revenue', data: proj.months.map(m => m.revenue),
+          backgroundColor: CHART_COLORS.yellow + '99', borderColor: CHART_COLORS.yellow, borderWidth: 1, order: 3 },
+        { label: 'Gross Profit', data: proj.months.map(m => m.grossProfit),
+          backgroundColor: CHART_COLORS.green + 'aa', borderColor: CHART_COLORS.green, borderWidth: 1, order: 2 },
+        { label: 'Net Income', data: proj.months.map(m => m.netIncome), type: 'line',
+          borderColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4, order: 1 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+
+  // Table
+  tbody.innerHTML = proj.months.map(m => `<tr>
+    <td><strong>${m.label}</strong></td>
+    <td class="num">${fmt(m.revenue)}</td>
+    <td class="num muted">${fmt(-m.cogs)}</td>
+    <td class="num green">${fmt(m.grossProfit)}</td>
+    <td class="num muted">${fmt(-m.opex)}</td>
+    <td class="num ${m.netIncome >= 0 ? 'green' : 'orange'}">${fmt(m.netIncome)}</td>
+    <td class="muted" style="font-size:11px">${m.source}</td>
+  </tr>`).join('');
+}
+</script>
+</body>
+</html>

@@ -1,27 +1,27 @@
 <!DOCTYPE html>
 <!--
   Pipeline — FORWARD VISIBILITY only.
-
+ 
   ▶ Read docs/CONTEXT.md §8.0 (Actionability Rule) before editing.
-
+ 
     SFS bids every job they can. They are NOT picky. So this page is
     NOT "which GCs should we pursue" or "which leads should we chase."
     It IS "given what we've already bid, what does forward booking and
     cash flow look like for the next 60-90 days?"
-
+ 
     Framing that's allowed:
       • "Pending bid value × historical win rate = expected revenue floor"
       • "Median time-to-award is X days — plan crew/equipment for that lag"
       • "Pending volume by GC — where the book of bids currently sits"
       • Multi-GC dedup count (informational — same project bid through N GCs)
       • Knowify rule reclassifications (data quality)
-
+ 
     Framing that's NOT allowed:
       • "Pursue these GCs"
       • "Focus on these sales leads"
       • "Chase these stale bids"
       • Anything that implies SFS chooses bids selectively
-
+ 
     Source of truth: applyKnowifyRules() in core/dash.js
 -->
 <html lang="en">
@@ -30,15 +30,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFS — Pipeline</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../core/styles.css?v=11">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=11"></script>
-<script src="../core/utils.js?v=11"></script>
-<script src="../core/gc-segmentation.js?v=11"></script>
-<script src="../core/dash.js?v=11"></script>
-<script src="../core/nav.js?v=11"></script>
+<script src="../core/firebase.js?v=12"></script>
+<script src="../core/utils.js?v=12"></script>
+<script src="../core/gc-segmentation.js?v=12"></script>
+<script src="../core/dash.js?v=12"></script>
+<script src="../core/nav.js?v=12"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -50,17 +49,17 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
-
+ 
 .main{padding:24px 28px;max-width:1700px;margin:0 auto}
 .page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
 .page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:16px}
 .page-note{background:var(--bg-card);border-left:3px solid var(--yellow);padding:10px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:24px;line-height:1.55}
 .page-note b{color:var(--txt-primary)}
-
+ 
 .section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
 .section-label .accent{color:var(--yellow);margin-right:6px}
 .section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
-
+ 
 .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
 .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
@@ -71,55 +70,55 @@ a{color:inherit;text-decoration:none}
 .kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
 .kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:600;color:var(--txt-primary)}
 .kpi-sub{font-size:11px;color:var(--txt-secondary);margin-top:4px}
-
+ 
 .panel{background:var(--bg-card);border:1px solid var(--border);padding:16px;margin-bottom:14px}
 .panel-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
 .panel-title .meta{color:var(--txt-muted);font-size:10px;letter-spacing:.05em;text-transform:none;font-weight:400}
 .panel-body{color:var(--txt-secondary);font-size:13px;line-height:1.55}
 .panel-body b{color:var(--txt-primary)}
-
+ 
 .grid-2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px}
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
-
+ 
 .metric-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--border)}
 .metric-row:last-child{border-bottom:none}
 .metric-label{color:var(--txt-secondary);font-size:12.5px}
 .metric-value{font-family:var(--font-mono);font-size:13px;color:var(--txt-primary);font-weight:500}
-
+ 
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
 th.num,td.num{text-align:right;font-family:var(--font-mono)}
 td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary)}
 tr:hover td{background:var(--bg-hover)}
-
+ 
 .chart-box{position:relative;height:280px}
 .chart-box.tall{height:340px}
 .chart-box.short{height:200px}
-
+ 
 .tag{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10px;letter-spacing:.05em;font-weight:600}
 .tag.muted{background:rgba(138,144,160,.15);color:var(--txt-secondary)}
 .tag.info{background:rgba(74,158,255,.15);color:var(--blue)}
 .tag.yellow{background:rgba(245,200,66,.15);color:var(--yellow)}
-
+ 
 .empty{color:var(--txt-muted);font-style:italic;padding:20px;text-align:center}
 .subtle-divider{height:1px;background:var(--border);margin:14px 0}
-
+ 
 .velocity-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .velocity-cell{background:var(--bg-panel);padding:12px;text-align:center}
 .velocity-cell .lbl{font-size:10px;color:var(--txt-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
 .velocity-cell .val{font-family:var(--font-mono);font-size:24px;color:var(--txt-primary);font-weight:600}
 .velocity-cell .unit{font-size:11px;color:var(--txt-secondary);margin-top:2px}
-
+ 
 .pill{display:inline-block;padding:2px 6px;background:var(--bg-panel);border-radius:2px;font-family:var(--font-mono);font-size:11px;color:var(--txt-secondary);margin-right:6px}
 </style>
 </head>
 <body>
 <div id="nav-mount"></div>
-
+ 
 <div class="main">
   <div class="page-title">PIPELINE</div>
   <div class="page-sub">Forward booking visibility — capacity & cash planning, not bid selection.</div>
-
+ 
   <div class="page-note">
     <b>How to read this page:</b> SFS bids every job they can — this isn't a "which leads to chase" page.
     It's a forward-visibility page. The top number to watch is the <b>expected booking floor</b>
@@ -127,10 +126,10 @@ tr:hover td{background:var(--bg-hover)}
     next 60–90 days. Everything below it is supporting context: how fast the GC market is awarding, where pending
     volume currently sits, and how the data was reclassified per the SFS Knowify rules.
   </div>
-
+ 
   <!-- ═══════ KPI ROW ═══════ -->
   <div class="kpi-row" id="kpiRow"></div>
-
+ 
   <!-- ═══════ FORWARD BOOKING FLOOR ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Forward booking floor</span><span class="hint">Pending value × historical $-win rate</span></div>
   <div class="grid-2">
@@ -147,7 +146,7 @@ tr:hover td{background:var(--bg-hover)}
       </div>
     </div>
   </div>
-
+ 
   <!-- ═══════ HEALTH OF THE FUNNEL (DESCRIPTIVE) ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Funnel shape</span><span class="hint">Competitive bids only — relationship channel separate</span></div>
   <div class="grid-2">
@@ -160,7 +159,7 @@ tr:hover td{background:var(--bg-hover)}
       <div class="chart-box short"><canvas id="cvChart"></canvas></div>
     </div>
   </div>
-
+ 
   <!-- ═══════ PENDING BY OUTREACH GROUP ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Pending bid $ by outreach group</span><span class="hint">A / B / C segmentation · see Outreach page for detail</span></div>
   <div class="panel">
@@ -174,7 +173,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
     <div style="overflow-x:auto"><table id="groupDistTable"></table></div>
   </div>
-
+ 
   <!-- ═══════ PENDING VOLUME BY GC ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Where pending volume currently sits</span><span class="hint">Descriptive — not "where to focus"</span></div>
   <div class="panel">
@@ -185,14 +184,14 @@ tr:hover td{background:var(--bg-hover)}
     </div>
     <div style="overflow-x:auto"><table id="gcTable"></table></div>
   </div>
-
+ 
   <!-- ═══════ SALES LEAD BREAKDOWN ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Bids by sales lead</span><span class="hint">Capacity context — who owns what volume</span></div>
   <div class="panel">
     <div class="panel-title">Sales Lead Distribution</div>
     <div style="overflow-x:auto"><table id="leadTable"></table></div>
   </div>
-
+ 
   <!-- ═══════ DATA QUALITY ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Knowify rule reclassifications</span><span class="hint">Data quality — see CONTEXT.md §3</span></div>
   <div class="grid-3">
@@ -215,14 +214,14 @@ tr:hover td{background:var(--bg-hover)}
       </div>
     </div>
   </div>
-
+ 
   <!-- ═══════ RELATIONSHIP CHANNEL ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Relationship channel</span><span class="hint">Direct-relationship work — separate from competitive bidding</span></div>
   <div class="panel">
     <div class="panel-title">Direct & Repeat Customer Work</div>
     <div id="relBlock" class="panel-body"></div>
   </div>
-
+ 
   <div class="section-label"><span><span class="accent">▸</span>Knowify ruleset (transparency)</span></div>
   <div class="panel" style="font-size:12.5px;color:var(--txt-secondary);line-height:1.7">
     <ol style="padding-left:20px;margin:0">
@@ -237,7 +236,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
   </div>
 </div>
-
+ 
 <script>
 function fmt$(n){
   if (n == null || !isFinite(n)) return '—';
@@ -247,7 +246,7 @@ function fmt$(n){
 }
 function fmtPct(n){ return n == null || !isFinite(n) ? '—' : n.toFixed(1) + '%'; }
 function el(id){ return document.getElementById(id); }
-
+ 
 function renderKPIs(R){
   const c = R.competitive;
   const expected = (c.pendingCV || 0) * (c.dollarWinRate || 0) / 100;
@@ -273,7 +272,7 @@ function renderKPIs(R){
       <div class="kpi-sub">won $ ÷ (won $ + lost $); informational only</div>
     </div>`;
 }
-
+ 
 function renderForecast(R){
   const c = R.competitive;
   if (!c || c.dollarWinRate == null) {
@@ -291,7 +290,7 @@ function renderForecast(R){
       Actual revenue lags by the bid → award → invoice cycle (see velocity panel).
     </div>`;
 }
-
+ 
 function renderVelocity(D){
   const v = (typeof pipelineVelocity === 'function') ? pipelineVelocity(D) : null;
   if (!v) {
@@ -306,7 +305,7 @@ function renderVelocity(D){
     </div>
     <div style="margin-top:8px;font-size:11px;color:var(--txt-muted);text-align:right">sample: ${v.sample} won bids</div>`;
 }
-
+ 
 function renderFunnel(R){
   const c = R.competitive;
   el('funnelStats').innerHTML = `
@@ -318,7 +317,7 @@ function renderFunnel(R){
     <div class="metric-row"><div class="metric-label">Bid-count win rate</div><div class="metric-value">${fmtPct(c.winRate)}</div></div>
     <div class="metric-row"><div class="metric-label">$-weighted win rate</div><div class="metric-value">${fmtPct(c.dollarWinRate)}</div></div>`;
 }
-
+ 
 function renderCVChart(R){
   const c = R.competitive;
   const ctx = document.getElementById('cvChart')?.getContext('2d');
@@ -347,7 +346,7 @@ function renderCVChart(R){
     },
   });
 }
-
+ 
 function renderGCTable(R){
   const rows = R.byGC || [];
   if (!rows.length) { el('gcTable').innerHTML = '<tr><td class="empty" colspan="7">No GC data yet.</td></tr>'; return; }
@@ -369,7 +368,7 @@ function renderGCTable(R){
   html += '</tbody>';
   el('gcTable').innerHTML = html;
 }
-
+ 
 function renderLeadTable(R){
   const rows = R.byLead || [];
   if (!rows.length) { el('leadTable').innerHTML = '<tr><td class="empty" colspan="6">No lead data yet.</td></tr>'; return; }
@@ -390,14 +389,14 @@ function renderLeadTable(R){
   html += '</tbody>';
   el('leadTable').innerHTML = html;
 }
-
+ 
 function renderQuality(R){
   el('staleCount').textContent = R.competitive.reclassifiedStale ?? 0;
   el('unbilledCount').textContent = R.competitive.reclassifiedUnbilled ?? 0;
   el('multiGCCount').textContent = R.multiGC.bidsInMultiGCProjects ?? 0;
   el('multiGCProjects').textContent = R.multiGC.projectCount ?? 0;
 }
-
+ 
 function renderGroupDist(D){
   if (typeof bidDistributionByGroup !== 'function') return;
   const dist = bidDistributionByGroup(D);
@@ -427,7 +426,7 @@ function renderGroupDist(D){
   html += '</tbody>';
   el('groupDistTable').innerHTML = html;
 }
-
+ 
 function renderRelationship(R){
   const rel = R.relationship || { bids: 0, wonCount: 0, wonCV: 0 };
   el('relBlock').innerHTML = `
@@ -438,7 +437,7 @@ function renderRelationship(R){
       Direct/repeat customer work where there's no real "win/loss" because there isn't a competitive bidding event. Tracked separately so it doesn't distort competitive win-rate.
     </div>`;
 }
-
+ 
 function render(D){
   const k = D?.['knowify-jobs'];
   if (!k?.jobs) {
@@ -458,7 +457,7 @@ function render(D){
   renderQuality(R);
   renderRelationship(R);
 }
-
+ 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof renderNav === 'function') renderNav('pipeline');
   if (typeof loadDashboard === 'function') {

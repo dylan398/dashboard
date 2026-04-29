@@ -19,16 +19,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFS — Revenue & Profit</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../core/styles.css?v=11">
+<link rel="stylesheet" href="../core/styles.css?v=12">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=11"></script>
-<script src="../core/utils.js?v=11"></script>
-<script src="../core/gc-segmentation.js?v=11"></script>
-<script src="../core/dso-reference.js?v=11"></script>
-<script src="../core/dash.js?v=11"></script>
-<script src="../core/nav.js?v=11"></script>
+<script src="../core/firebase.js?v=12"></script>
+<script src="../core/utils.js?v=12"></script>
+<script src="../core/gc-segmentation.js?v=12"></script>
+<script src="../core/dso-reference.js?v=12"></script>
+<script src="../core/dash.js?v=12"></script>
+<script src="../core/nav.js?v=12"></script>
 </head>
 <body>
 <main class="main">
@@ -320,120 +320,4 @@ function renderLabor(D) {
   const ctx = document.getElementById('chart-labor');
   if (charts.labor) charts.labor.destroy();
   const barFill = (s) => s.isComplete
-    ? ((s.revPerLabor || 0) >= 3 ? CHART_COLORS.green + 'aa' : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow + 'aa' : CHART_COLORS.red + 'aa')
-    : 'rgba(138,144,160,.30)';
-  const barEdge = (s) => s.isComplete
-    ? ((s.revPerLabor || 0) >= 3 ? CHART_COLORS.green : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow : CHART_COLORS.red)
-    : '#8a90a0';
-  charts.labor = new Chart(ctx, {
-    type: 'bar',
-    data: { labels: series.map(s => s.isComplete ? s.year : `${s.year} (YTD ${s.monthName||''})`),
-      datasets: [{
-        label: 'Revenue per Labor $', data: series.map(s => s.revPerLabor),
-        backgroundColor: series.map(barFill),
-        borderColor: series.map(barEdge),
-        borderWidth: 1,
-      }] },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { y: { ticks: { callback: v => '$' + v.toFixed(2) } } },
-      plugins: { legend: { display: false }, tooltip: { callbacks: {
-        label: c => '$' + c.parsed.y + ' rev / $1 labor',
-        afterLabel: c => {
-          const s = series[c.dataIndex];
-          const base = `Rev: ${fmtK(s.revenue)}, Labor: ${fmtK(s.labor)}`;
-          return s.isComplete ? base : base + `\nPartial year · ${s.monthsCovered}/12 months · revenue suppressed by Q1 seasonality, labor cost roughly constant`;
-        },
-      } } } },
-  });
-
-  // Right panel — labor mix for latest *complete* year
-  const latest = [...series].reverse().find(s => s.isComplete) || series[series.length - 1];
-  document.getElementById('labor-period').textContent = latest?.year || '';
-  const el = document.getElementById('labor-mix');
-  if (latest && latest.labor > 0) {
-    el.innerHTML = `
-      <div class="stat-row"><div class="stat-row-label">Wages (COGS — field labor)</div><div class="stat-row-value">${fmtK(latest.wagesCogs)}</div></div>
-      <div class="stat-row"><div class="stat-row-label">Salaries (OpEx — office)</div><div class="stat-row-value">${fmtK(latest.salariesOpex)}</div></div>
-      <div class="stat-row"><div class="stat-row-label">Total labor</div><div class="stat-row-value">${fmtK(latest.labor)}</div></div>
-      <div class="stat-row"><div class="stat-row-label">Revenue / labor $</div><div class="stat-row-value yellow">$${latest.revPerLabor?.toFixed(2) || '—'}</div></div>
-      <div class="stat-row"><div class="stat-row-label">Field-labor mix</div><div class="stat-row-value muted">${latest.labor ? Math.round(latest.wagesCogs/latest.labor*100) : 0}% of total labor</div></div>`;
-  } else {
-    el.innerHTML = '<div class="empty">No labor detail in this period.</div>';
-  }
-}
-
-function renderYearPicker(D) {
-  const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).sort();
-  const latest = years[years.length - 1];
-  document.getElementById('year-pick').innerHTML = years.map(y => {
-    const status = (typeof _yearStatus === 'function') ? _yearStatus(D, y) : { complete: true };
-    return `<button onclick="renderYearDetail(currentData, '${y}')" class="${y === latest ? 'active' : ''} ${status.complete ? '' : 'partial'}" data-yr="${y}">${y}</button>`;
-  }).join('');
-}
-
-function renderYearDetail(D, yr) {
-  const data = D['qbo-pl_all']?.[yr] || {};
-  const status = (typeof _yearStatus === 'function') ? _yearStatus(D, yr) : { complete: true };
-  document.querySelectorAll('#year-pick button').forEach(b => b.classList.toggle('active', b.dataset.yr === yr));
-  document.getElementById('is-period').textContent = (status.complete ? data.meta?.period || yr : `${yr} YTD through ${status.monthName || ''}`);
-  const row = (label, val, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="num">${val != null ? fmt(val) : '—'}</td></tr>`;
-  document.getElementById('t-pl').innerHTML = `
-    <thead><tr><th>Line</th><th class="num">Amount</th></tr></thead>
-    <tbody>
-      ${row('Revenue', data.revenue, 'total')}
-      ${row('Cost of Goods Sold', data.cogsTotal != null ? -data.cogsTotal : null)}
-      ${row('Gross Profit', data.grossProfit, 'total highlight')}
-      ${row('Operating Expenses', data.opexTotal != null ? -data.opexTotal : null)}
-      ${row('Net Operating Income', data.netOpIncome, 'total highlight')}
-      ${row('Net Income', data.netIncome, 'total highlight-strong')}
-      ${row('EBITDA (est.)', data.ebitda)}
-    </tbody>`;
-  // OpEx donut
-  const opex = data.opex || {};
-  const sortedOpex = Object.entries(opex).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const ctx = document.getElementById('chart-opex');
-  if (charts.opex) charts.opex.destroy();
-  if (!sortedOpex.length) return;
-  charts.opex = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels: sortedOpex.map(([k]) => k.replace(/_/g, ' ')), datasets: [{
-      data: sortedOpex.map(([, v]) => v),
-      backgroundColor: [CHART_COLORS.yellow, CHART_COLORS.orange, CHART_COLORS.red, CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.purple, '#c9a02e', '#e67e22', '#27ae60', '#3498db'],
-      borderWidth: 1, borderColor: 'var(--bg-card)',
-    }] },
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'right', labels: { boxWidth: 10 } },
-        tooltip: { callbacks: { label: c => c.label + ': ' + fmt(c.parsed) } } } },
-  });
-}
-
-function renderEbitdaChart(D) {
-  const all = D['qbo-pl_all'] || {};
-  const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];
-  const years = statuses.map(s => s.year);
-  const labels = statuses.map(s => s.complete ? s.year : `${s.year} YTD`);
-  const ctx = document.getElementById('chart-ebitda');
-  if (charts.ebitda) charts.ebitda.destroy();
-  charts.ebitda = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [
-      { label: 'EBITDA',
-        data: years.map(y => all[y].ebitda || 0),
-        backgroundColor: statuses.map((s, i) => !s.complete ? 'rgba(138,144,160,.30)' : ((all[s.year].ebitda || 0) >= 0 ? CHART_COLORS.green + 'aa' : CHART_COLORS.red + 'aa')),
-        borderColor: statuses.map((s, i) => !s.complete ? '#8a90a0' : ((all[s.year].ebitda || 0) >= 0 ? CHART_COLORS.green : CHART_COLORS.red)),
-        borderWidth: 1 },
-      { label: 'Net Income', data: years.map(y => all[y].netIncome || 0),
-        type: 'line', borderColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4 },
-    ] },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
-      plugins: { tooltip: { callbacks: {
-        label: c => c.dataset.label + ': ' + fmt(c.parsed.y),
-        afterLabel: c => statuses[c.dataIndex]?.complete ? '' : 'Partial year — not comparable to full-year bars.',
-      } } } },
-  });
-}
-</script>
-</body>
-</html>
+    ? ((s.revPerLa

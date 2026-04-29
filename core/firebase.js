@@ -188,70 +188,17 @@ const DB = {
     const existing = await this.read(base) || {};
     const existingAccts = (existing.accountSummary || []).reduce((m, a) => { m[a.name] = a; return m; }, {});
     (newData.accountSummary || []).forEach(a => {
-      // Newer upload wins for summary (more complete data assumed)
+      // Newer upload wins (more complete data assumed)
       existingAccts[a.name] = a;
     });
-
-    // Merge accountDetail item-by-item with deduping. The qbo-transactions
-    // export covers a date range; if Dylan uploads "All Time" this overlaps
-    // with prior uploads. Deduping by date|type|name|amount keeps history
-    // accurate without double-counting. AR detail (used for DSO computation)
-    // especially needs every Invoice + Payment preserved.
-    const detailMerged = {};
-    const seen = (item) => `${item.date}|${item.type||''}|${item.name||''}|${item.amount}`;
-    // Start from existing
-    Object.entries(existing.accountDetail || {}).forEach(([acct, info]) => {
-      detailMerged[acct] = {
-        total: info.total,
-        isAR: !!info.isAR,
-        items: [...(info.items || [])],
-        _seen: new Set((info.items || []).map(seen)),
-      };
-    });
-    // Layer in new
-    Object.entries(newData.accountDetail || {}).forEach(([acct, info]) => {
-      if (!detailMerged[acct]) {
-        detailMerged[acct] = {
-          total: info.total,
-          isAR: !!info.isAR,
-          items: [],
-          _seen: new Set(),
-        };
-      }
-      const target = detailMerged[acct];
-      // Newer total wins (assuming newer upload = larger date span)
-      target.total = info.total;
-      target.isAR = !!info.isAR || target.isAR;
-      (info.items || []).forEach(item => {
-        const k = seen(item);
-        if (!target._seen.has(k)) {
-          target.items.push(item);
-          target._seen.add(k);
-        }
-      });
-    });
-    // Strip the _seen Sets (Firebase can't store them) and sort items by date
-    const cleanedDetail = {};
-    Object.entries(detailMerged).forEach(([acct, info]) => {
-      cleanedDetail[acct] = {
-        total: info.total,
-        isAR: info.isAR,
-        items: info.items.sort((a, b) => new Date(a.date) - new Date(b.date)),
-      };
-    });
-
     const merged = sanitize({
       accountSummary: Object.values(existingAccts).sort((a,b) => Math.abs(b.total)-Math.abs(a.total)),
-      accountDetail: cleanedDetail,
+      accountDetail: { ...(existing.accountDetail||{}), ...(newData.accountDetail||{}) },
       meta: { ...newData.meta, mergedAt: new Date().toISOString() }
     });
     await this.set(base, merged);
-    // Stats for manifest
-    const arAccts = Object.values(cleanedDetail).filter(a => a.isAR);
-    const arItemCount = arAccts.reduce((s, a) => s + (a.items?.length || 0), 0);
     await this.updateManifest('qbo-transactions', {
       accountCount: Object.keys(merged.accountSummary || {}).length,
-      arItemCount,
       updatedAt: new Date().toISOString(),
       period: newData.meta?.period || ''
     });

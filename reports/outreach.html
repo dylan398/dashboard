@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <!--
   Outreach / Customer Segmentation — DESCRIPTIVE only.
-
+ 
   ▶ Read docs/CONTEXT.md §2.5 + §8.0 before editing.
-
+ 
     This page surfaces the Group A / B / C segmentation that came out
     of the April-2026 pricing-sensitivity analysis. Important framing:
     the *segmentation* is useful (it describes the shape of the bid
     book), but the *recommendations* attached to each group ("dinners
     with these," "stop bidding those") are analyst-suggested, not what
     SFS is actually going to do. Treat them with much less weight.
-
+ 
     PlanHub is shown separately under "DATA-ARTIFACT" — won PlanHub
     bids get renamed to the real GC after award, so the apparent 0%
     win rate isn't a real signal and is excluded from C-STOP totals.
@@ -21,15 +21,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFS — Outreach Segmentation</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../core/styles.css?v=11">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=11"></script>
-<script src="../core/utils.js?v=11"></script>
-<script src="../core/gc-segmentation.js?v=11"></script>
-<script src="../core/dash.js?v=11"></script>
-<script src="../core/nav.js?v=11"></script>
+<script src="../core/firebase.js?v=12"></script>
+<script src="../core/utils.js?v=12"></script>
+<script src="../core/gc-segmentation.js?v=12"></script>
+<script src="../core/dash.js?v=12"></script>
+<script src="../core/nav.js?v=12"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -41,17 +40,17 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
-
+ 
 .main{padding:24px 28px;max-width:1700px;margin:0 auto}
 .page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
 .page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:16px}
 .page-note{background:var(--bg-card);border-left:3px solid var(--yellow);padding:11px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:24px;line-height:1.55}
 .page-note b{color:var(--txt-primary)}
-
+ 
 .section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
 .section-label .accent{color:var(--yellow);margin-right:6px}
 .section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
-
+ 
 .group-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
 .group-card{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden;border-top:3px solid var(--c,var(--border-bright))}
 .group-card.A{--c:var(--green)}
@@ -65,23 +64,23 @@ a{color:inherit;text-decoration:none}
 .gc-stat:last-child{border:none}
 .gc-stat .l{color:var(--txt-muted)}
 .gc-stat .v{font-family:var(--font-mono);color:var(--txt-primary);font-weight:500}
-
+ 
 .panel{background:var(--bg-card);border:1px solid var(--border);padding:16px;margin-bottom:14px}
 .panel-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
 .panel-title .meta{color:var(--txt-muted);font-size:10px;letter-spacing:.05em;text-transform:none;font-weight:400}
 .panel-body{color:var(--txt-secondary);font-size:13px;line-height:1.55}
 .panel-body b{color:var(--txt-primary)}
-
+ 
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
 .chart-box{position:relative;height:280px}
 .chart-box.short{height:220px}
-
+ 
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
 th.num,td.num{text-align:right;font-family:var(--font-mono)}
 td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary)}
 tr:hover td{background:var(--bg-hover)}
-
+ 
 .tag{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10px;letter-spacing:.05em;font-weight:600}
 .tag.A{background:rgba(62,207,142,.15);color:var(--green)}
 .tag.B{background:rgba(74,158,255,.15);color:var(--blue)}
@@ -90,21 +89,21 @@ tr:hover td{background:var(--bg-hover)}
 .tag.cmix{background:rgba(224,123,43,.15);color:var(--orange)}
 .tag.dataartifact{background:rgba(138,144,160,.18);color:var(--txt-secondary)}
 .tag.unclassified{background:rgba(138,144,160,.1);color:var(--txt-muted)}
-
+ 
 .empty{color:var(--txt-muted);font-style:italic;padding:20px;text-align:center}
 .cap{font-size:11px;color:var(--txt-muted);margin-top:8px;line-height:1.55;font-style:italic}
 .notebox{background:rgba(245,200,66,.06);border:1px solid rgba(245,200,66,.2);padding:10px 14px;font-size:12.5px;color:var(--txt-secondary);line-height:1.55;margin-top:10px}
-
+ 
 .subtle{color:var(--txt-muted);font-size:12px}
 </style>
 </head>
 <body>
 <div id="nav-mount"></div>
-
+ 
 <div class="main">
   <div class="page-title">CUSTOMER SEGMENTATION</div>
   <div class="page-sub">Group A / B / C view of the GC bid book — descriptive only.</div>
-
+ 
   <div class="page-note">
     <b>How to read this page:</b> the groups below describe the *shape* of the bid book — which GCs win bids consistently,
     which are competitive, which haven't awarded SFS work despite many submissions. The segmentation came out of the April-2026
@@ -119,11 +118,11 @@ tr:hover td{background:var(--bg-hover)}
     PlanHub is shown separately under <b>data-artifact</b>: won PlanHub bids get renamed to the real GC in Knowify after
     award, so its apparent 0% win rate isn't a real number.
   </div>
-
+ 
   <!-- ═══════ GROUP CARDS ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Bid book by group</span><span class="hint">Live from Knowify · counts are bid records</span></div>
   <div class="group-row" id="groupRow"></div>
-
+ 
   <!-- ═══════ DISTRIBUTION ═══════ -->
   <div class="grid-2">
     <div class="panel">
@@ -137,7 +136,7 @@ tr:hover td{background:var(--bg-hover)}
       <div class="cap">Where won contract value has historically come from. Group A and Group B together typically account for the bulk of revenue.</div>
     </div>
   </div>
-
+ 
   <!-- ═══════ GROUP A ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Group A — Inelastic relationships</span><span class="hint">≥70% WR · ≥5 decided bids · derived live from Knowify</span></div>
   <div class="panel">
@@ -148,7 +147,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
     <div style="overflow-x:auto"><table id="groupATable"></table></div>
   </div>
-
+ 
   <!-- ═══════ GROUP B ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Group B — Active competitive</span><span class="hint">Owner-level outreach · 30–69% WR · 5+ bids · 26 GCs</span></div>
   <div class="panel">
@@ -160,7 +159,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
     <div style="overflow-x:auto"><table id="groupBTable"></table></div>
   </div>
-
+ 
   <!-- ═══════ GROUP C ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Group C — Zero-win subgroups</span><span class="hint">Estimator-level outreach · 152 GCs · 1,797 bids · 0 historical wins</span></div>
   <div class="notebox" style="margin-bottom:14px">
@@ -196,7 +195,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
     <div style="overflow-x:auto"><table id="groupCMixTable"></table></div>
   </div>
-
+ 
   <!-- ═══════ DATA ARTIFACT ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>Data artifact</span><span class="hint">PlanHub — Knowify reporting quirk</span></div>
   <div class="panel">
@@ -210,7 +209,7 @@ tr:hover td{background:var(--bg-hover)}
       </div>
     </div>
   </div>
-
+ 
   <!-- ═══════ NATIONAL CHAIN BRANDS ═══════ -->
   <div class="section-label"><span><span class="accent">▸</span>National chain brands</span><span class="hint">Separate dimension — brand names, not GCs</span></div>
   <div class="panel">
@@ -222,7 +221,7 @@ tr:hover td{background:var(--bg-hover)}
     <div style="overflow-x:auto"><table id="chainTable"></table></div>
   </div>
 </div>
-
+ 
 <script>
 function fmt$(n){
   if (n == null || !isFinite(n)) return '—';
@@ -232,7 +231,7 @@ function fmt$(n){
 }
 function fmtPct(n){ return n == null || !isFinite(n) ? '—' : (typeof n === 'number' ? n.toFixed(1) + '%' : n); }
 const el = id => document.getElementById(id);
-
+ 
 const GROUP_META = {
   A:           { tag: 'A',         label: 'Group A',  desc: 'Inelastic — wins held',         cls: 'A',     css: 'A' },
   B:           { tag: 'B',         label: 'Group B',  desc: 'Active competitive',            cls: 'B',     css: 'B' },
@@ -240,7 +239,7 @@ const GROUP_META = {
  'C-PUB':      { tag: 'C-PUB',     label: 'C-PUB',    desc: 'Public-sector zero-win',        cls: 'cpub',  css: 'cpub' },
  'C-MIX':      { tag: 'C-MIX',     label: 'C-MIX',    desc: 'Mixed commercial zero-win',     cls: 'cmix',  css: 'cmix' },
 };
-
+ 
 function renderGroupRow(dist){
   const order = ['A','B','C-STOP','C-PUB','C-MIX'];
   const html = order.map(g => {
@@ -259,7 +258,7 @@ function renderGroupRow(dist){
   }).join('');
   el('groupRow').innerHTML = html;
 }
-
+ 
 function makeBarChart(canvasId, labels, values, colors){
   const ctx = document.getElementById(canvasId)?.getContext('2d');
   if (!ctx) return;
@@ -287,7 +286,7 @@ function makeBarChart(canvasId, labels, values, colors){
     },
   });
 }
-
+ 
 function renderCharts(dist){
   const order = ['A','B','C-STOP','C-PUB','C-MIX'];
   const colors = ['#3ecf8e','#4a9eff','#e05252','#9b6dff','#e07b2b'];
@@ -295,7 +294,7 @@ function renderCharts(dist){
   makeBarChart('pendingChart', lblsB, order.map(g => dist[g]?.pendingCV || 0), colors);
   makeBarChart('wonChart',     lblsB, order.map(g => dist[g]?.wonCV || 0),     colors);
 }
-
+ 
 function renderGroupTable(tableId, gcs, opts = {}) {
   const limit = opts.limit || 30;
   const showWonCV = opts.showWonCV !== false;
@@ -322,7 +321,7 @@ function renderGroupTable(tableId, gcs, opts = {}) {
   html += '</tbody>';
   el(tableId).innerHTML = html;
 }
-
+ 
 function renderPlanhub(D){
   const k = D?.['knowify-jobs'];
   if (!k?.jobs) { el('planhubBlock').innerHTML = '<div class="empty">No Knowify data.</div>'; return; }
@@ -337,7 +336,7 @@ function renderPlanhub(D){
       <div><div class="subtle">Pending</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600">${ph.pending}</div></div>
     </div>`;
 }
-
+ 
 function renderChains(){
   const chains = (window.NATIONAL_CHAINS || []);
   if (!chains.length) { el('chainTable').innerHTML = '<tr><td class="empty" colspan="5">No chain data loaded.</td></tr>'; return; }
@@ -357,7 +356,7 @@ function renderChains(){
   html += '</tbody>';
   el('chainTable').innerHTML = html;
 }
-
+ 
 function render(D){
   if (!D?.['knowify-jobs']?.jobs) {
     document.querySelector('.main').insertAdjacentHTML('afterbegin',
@@ -376,7 +375,7 @@ function render(D){
   renderPlanhub(D);
   renderChains();
 }
-
+ 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof renderNav === 'function') renderNav('outreach');
   if (typeof loadDashboard === 'function') {

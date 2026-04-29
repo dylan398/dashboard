@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
   Customers — DESCRIPTIVE only.
-
+ 
   ▶ Read docs/CONTEXT.md §8.0 (Actionability Rule) before editing.
     SFS doesn't choose customers — they bid every job they can. They
     can't force AR to be paid faster. So this page presents the customer
     book as it is — lifetime revenue, current open AR, days-out
     distribution — without any "do this" framing, no alarm coloring,
     no slow-payer callouts, no "concentration warning."
-
+ 
     Concentration % is shown as informational context for SBA loan
     narratives. Days-out distribution is shown so Dylan can see the
     shape of his AR book, not so he'll chase customers.
@@ -22,13 +22,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<link rel="stylesheet" href="../core/styles.css?v=11">
-<script src="../core/firebase.js?v=11"></script>
-<script src="../core/utils.js?v=11"></script>
-<script src="../core/gc-segmentation.js?v=11"></script>
-<script src="../core/dso-reference.js?v=11"></script>
-<script src="../core/dash.js?v=11"></script>
-<script src="../core/nav.js?v=11"></script>
+<script src="../core/firebase.js?v=12"></script>
+<script src="../core/utils.js?v=12"></script>
+<script src="../core/dash.js?v=12"></script>
+<script src="../core/nav.js?v=12"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -40,30 +37,30 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
-
+ 
 .main{padding:24px 28px;max-width:1700px;margin:0 auto}
 .page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
 .page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
 .section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
 .section-label .accent{color:var(--yellow);margin-right:6px}
-
+ 
 .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
 .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
 .kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
 .kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1;color:var(--txt-primary)}
 .kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
-
+ 
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
 .grid-3070{display:grid;grid-template-columns:3fr 7fr;gap:14px;margin-bottom:14px}
-
+ 
 .panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
 .panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
-
+ 
 .chart-wrap{position:relative;width:100%}
 .chart-wrap.h220{height:220px}.chart-wrap.h280{height:280px}
-
+ 
 .t{width:100%;border-collapse:collapse;font-size:12px}
 .t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
 .t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
@@ -71,17 +68,17 @@ a{color:inherit;text-decoration:none}
 .t td.muted{color:var(--txt-muted);font-size:11px}
 .t tr:hover{background:var(--bg-hover)}
 .t-scroll{max-height:560px;overflow-y:auto;background:var(--bg-card)}
-
+ 
 .note{background:rgba(74,158,255,.06);border-left:2px solid var(--blue);padding:10px 14px;font-size:12px;color:var(--txt-secondary);margin-bottom:14px;line-height:1.5}
 .note strong{color:var(--blue)}
-
+ 
 .empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
 .empty-state a{color:var(--yellow)}
-
+ 
 /* Concentration bar — informational, not alarm-coded */
 .conc-bar{display:flex;height:20px;background:var(--bg-hover);border:1px solid var(--border);overflow:hidden}
 .conc-seg{position:relative;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:#000;font-weight:600}
-
+ 
 /* Days-out distribution — neutral colors, no alarm coding */
 .dist-row{display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:10px;padding:6px 0;font-size:13px}
 .dist-row .label{color:var(--txt-secondary);font-family:var(--font-display);text-transform:uppercase;font-size:11px;letter-spacing:.06em}
@@ -94,18 +91,18 @@ a{color:inherit;text-decoration:none}
 <main class="main">
   <div class="page-title">Customers & AR</div>
   <div class="page-sub">The customer book as it is — lifetime revenue, currently-open AR, time-to-pay distribution. Descriptive view; SFS bids every job and can't force payment timing.</div>
-
+ 
   <div class="note">
     <strong>How to read this page:</strong> nothing here is "do something" — it's "here's the shape of the book." TX subcontractors have no enforceable payment deadlines, so days-out is just <em>how long customers historically take to pay</em>, not a problem list. Concentration % is informational context for SBA loan narratives, not a warning.
   </div>
-
+ 
   <div id="empty-state" class="empty-state" style="display:none">
     No customer data yet. Go to <a href="../admin.html">Admin</a> to upload Sales by Customer Detail and Open Invoices.
   </div>
-
+ 
   <div id="content" style="display:none">
     <div class="kpi-row" id="kpi-row"></div>
-
+ 
     <div class="section-label"><span><span class="accent">▸</span> Lifetime Revenue Picture</span></div>
     <div class="grid-3070">
       <div class="panel">
@@ -117,7 +114,7 @@ a{color:inherit;text-decoration:none}
         <div class="chart-wrap h280"><canvas id="chart-revenue"></canvas></div>
       </div>
     </div>
-
+ 
     <div class="section-label"><span><span class="accent">▸</span> Currently Open AR</span><span id="ar-asof" style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">—</span></div>
     <div class="grid-2">
       <div class="panel">
@@ -129,59 +126,31 @@ a{color:inherit;text-decoration:none}
         <div id="dpd-stats"></div>
       </div>
     </div>
-
-    <div class="section-label">
-      <span><span class="accent">▸</span> Expected Collections Forecast</span>
-      <span class="hint">Per-customer DSO history × open invoices</span>
-    </div>
-    <div class="page-note blue">
-      <b>How this works:</b> the dashboard pairs each open invoice with the historical median days-to-pay
-      for that customer (computed automatically from the QBO Transaction Detail you've already uploaded —
-      Invoices on the AR account FIFO-matched to Payments). Customers with ≥3 paid invoices in history get
-      a client-specific estimate; everyone else falls back to the portfolio median. <b>This is a planning
-      input, not a chase list</b> — SFS doesn't control when AR pays (CONTEXT.md §8.0).
-    </div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-title"><span>Forecast by Bucket</span><span class="meta" id="fc-source">—</span></div>
-        <div id="forecast-buckets"></div>
-        <div id="forecast-confidence" style="margin-top:14px;font-size:11.5px;color:var(--txt-muted);line-height:1.55"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title"><span>Soonest Expected Payments</span><span class="meta">Top 25 by remaining days</span></div>
-        <div class="t-scroll" style="max-height:340px;background:transparent">
-          <table class="t" id="t-forecast">
-            <thead><tr><th>Customer</th><th class="num">Amount</th><th class="num">Days open</th><th class="num">Expected pay</th><th class="num">Confidence</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
+ 
     <div class="section-label"><span><span class="accent">▸</span> Open AR by Customer</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Descriptive — not a watchlist</span></div>
     <div class="panel" style="padding:0">
       <div class="t-scroll" style="max-height:540px"><table class="t" id="t-customers"><thead><tr><th>Customer</th><th>Open balance</th><th>Open invoices</th><th>Avg days out</th><th>Oldest open</th></tr></thead><tbody></tbody></table></div>
     </div>
-
+ 
     <div class="section-label"><span><span class="accent">▸</span> All Open Invoices</span><span id="inv-count" style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">—</span></div>
     <div class="panel" style="padding:0">
       <div class="t-scroll" style="max-height:520px"><table class="t" id="t-invoices"><thead><tr><th>Customer</th><th>Invoice #</th><th>Date</th><th>Due</th><th>Days out</th><th>Amount</th></tr></thead><tbody></tbody></table></div>
     </div>
-
+ 
     <div class="section-label"><span><span class="accent">▸</span> Top Lifetime Customers</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">All-time, from Sales by Customer Detail</span></div>
     <div class="panel" style="padding:0">
       <div class="t-scroll" style="max-height:520px"><table class="t" id="t-lifetime"><thead><tr><th>#</th><th>Customer</th><th>Lifetime revenue</th><th>% of total</th><th>Transactions</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </main>
-
+ 
 <script>
 injectNavStyles();
 renderNav('customers');
 setupChartTheme();
-
+ 
 let charts = {};
-
+ 
 loadDashboard((D, raw) => {
   const sales = D?.['qbo-sales'];
   const oi = D?.['qbo-open-invoices'];
@@ -193,99 +162,17 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
-
+ 
   renderKPIs(D);
   renderConcentration(D);
   renderRevenueChart(D);
   renderDistribution(D);
   renderStats(D);
-  renderForecast(D);
   renderCustomersTable(D);
   renderInvoicesTable(D);
   renderLifetimeTable(D);
 });
-
-// ── Collections forecast (auto-computed from qbo-transactions; static fallback)
-function renderForecast(D) {
-  const fc = (typeof forecastCollections === 'function') ? forecastCollections(D) : null;
-  const portfolio = (typeof dsoPortfolioSummary === 'function') ? dsoPortfolioSummary(D) : null;
-  const sourceLabel = portfolio?.source === 'computed-from-transactions'
-    ? `Computed from ${portfolio.totalInvoices} matched invoices · portfolio median ${portfolio.portfolioMedianDSO}d`
-    : portfolio?.source === 'static-baseline'
-      ? `Static baseline (re-upload Transaction Detail to refresh) · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
-      : 'No DSO history yet';
-  document.getElementById('fc-source').textContent = sourceLabel;
-
-  const bucketEl = document.getElementById('forecast-buckets');
-  if (!fc) {
-    bucketEl.innerHTML = '<div class="empty">No open invoices to forecast.</div>';
-    document.getElementById('t-forecast').querySelector('tbody').innerHTML =
-      '<tr><td colspan="5" class="empty">—</td></tr>';
-    return;
-  }
-
-  // Bucket bars
-  const total = fc.totalOpen || 1;
-  const colors = ['var(--green)', 'var(--yellow)', 'var(--orange)', 'var(--red)', 'var(--red)', 'var(--txt-muted)'];
-  bucketEl.innerHTML = fc.buckets.map((b, i) => {
-    if (b.amount <= 0 && b.count === 0) return '';
-    const pct = (b.amount / total * 100).toFixed(1);
-    return `<div class="aging-row">
-      <div class="label">${b.label}</div>
-      <div class="bar"><div class="bar-fill" style="width:${pct}%;background:${colors[i]}"></div></div>
-      <div class="val">${fmtK(b.amount)}</div>
-    </div>
-    <div style="font-size:10px;color:var(--txt-muted);text-align:right;margin:-4px 4px 6px 0;font-family:var(--font-mono)">${b.count} inv${b.count===1?'':'s'} · ${pct}%</div>`;
-  }).join('');
-
-  // Confidence breakdown
-  const c = fc.confidenceBreakdown || {};
-  const tOk = (c.clientHistory || 0);
-  const tLow = (c.lowSample || 0);
-  const tFb = (c.portfolioFallback || 0);
-  const tUn = (c.unknown || 0);
-  document.getElementById('forecast-confidence').innerHTML = `
-    <b>Confidence breakdown</b> (% of open AR $):
-    <span style="color:var(--green)">client history ${(tOk/total*100).toFixed(0)}%</span> ·
-    <span style="color:var(--yellow)">low sample ${(tLow/total*100).toFixed(0)}%</span> ·
-    <span style="color:var(--orange)">portfolio prior ${(tFb/total*100).toFixed(0)}%</span>${tUn > 0 ? ` · <span style="color:var(--txt-muted)">unknown ${(tUn/total*100).toFixed(0)}%</span>` : ''}.
-    Customers with ≥3 paid invoices in history get a client-specific estimate.`;
-
-  // Soonest-expected table
-  const tbody = document.getElementById('t-forecast').querySelector('tbody');
-  const rows = (fc.topExpectedSoonest || []).slice(0, 25);
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No invoices with estimates.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.map(({inv, est}) => {
-    if (!est) return `<tr>
-      <td>${inv.customer || '—'}</td>
-      <td class="num">${fmtK(inv.openBalance)}</td>
-      <td class="num muted">—</td>
-      <td class="num muted">no estimate</td>
-      <td class="num muted">—</td>
-    </tr>`;
-    const confLabel = est.confidence === 'client-history'      ? `client n=${est.nPaid}`
-                    : est.confidence === 'low-sample'          ? `low (n=${est.nPaid})`
-                    : est.confidence === 'portfolio-fallback'  ? 'portfolio'
-                    : '—';
-    const confClass = est.confidence === 'client-history' ? 'green'
-                    : est.confidence === 'low-sample'     ? 'yellow'
-                    : 'orange';
-    const overdueTag = est.isLate
-      ? `<span style="color:var(--orange);font-size:10px">past expected</span>`
-      : `<span class="muted" style="font-size:10px">~${est.remainingDays}d remaining</span>`;
-    return `<tr>
-      <td>${est.customer || inv.customer || '—'}</td>
-      <td class="num">${fmtK(est.amount)}</td>
-      <td class="num">${est.daysOpen}d</td>
-      <td class="num"><span class="muted">${est.expectedPayDate}</span><br>${overdueTag}</td>
-      <td class="num"><span class="${confClass}">${confLabel}</span></td>
-    </tr>`;
-  }).join('');
-}
-
+ 
 // ── KPI strip — descriptive: customer count, total lifetime, current open AR, count of open invoices
 function renderKPIs(D) {
   const sales = D['qbo-sales'] || {};
@@ -293,7 +180,7 @@ function renderKPIs(D) {
   const bs    = D['qbo-bs'] || {};
   const totalOpen = oi.summary?.totalOpen ?? bs.ar ?? null;
   const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
-
+ 
   const kpis = [
     { label: 'Lifetime customers', value: sales.topCustomers?.length ?? '—', sub: sales.totalRevenue ? fmtK(sales.totalRevenue) + ' lifetime' : '—' },
     { label: 'Current open AR', value: totalOpen != null ? fmtK(totalOpen) : '—', sub: oi.meta?.invoiceCount ? `${oi.meta.invoiceCount} invoices` : '' },
@@ -311,7 +198,7 @@ function renderKPIs(D) {
       <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
     </div>`).join('');
 }
-
+ 
 // ── Concentration block — neutral, no alarm coloring
 function renderConcentration(D) {
   const sales = D['qbo-sales'] || {};
@@ -333,7 +220,7 @@ function renderConcentration(D) {
       ${customerRows}
     </table>`;
 }
-
+ 
 function renderRevenueChart(D) {
   const sales = D['qbo-sales'] || {};
   const annual = sales.annualTotals || {};
@@ -368,7 +255,7 @@ function renderRevenueChart(D) {
   });
   document.getElementById('sales-meta').textContent = years.length ? `${years[0]}–${years[years.length-1]}` : '—';
 }
-
+ 
 // ── Days-out distribution — neutral yellow bars, no severity coloring
 function renderDistribution(D) {
   const oi = D['qbo-open-invoices'] || {};
@@ -429,7 +316,7 @@ function renderDistribution(D) {
     </div>`;
   }).join('');
 }
-
+ 
 function renderStats(D) {
   const oi = D['qbo-open-invoices'] || {};
   const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
@@ -454,7 +341,7 @@ function renderStats(D) {
     Construction industry DSO is normally 60–90 days. SFS sub-segment runs 50–80 days. These are descriptive — not a target you can directly hit.
   </div>`;
 }
-
+ 
 // ── Open AR by customer — pure list, no color coding
 function renderCustomersTable(D) {
   const oi = D['qbo-open-invoices'] || {};
@@ -493,7 +380,7 @@ function renderCustomersTable(D) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No AR data.</td></tr>';
   }
 }
-
+ 
 function renderInvoicesTable(D) {
   const oi = D['qbo-open-invoices'] || {};
   const tbody = document.querySelector('#t-invoices tbody');
@@ -516,7 +403,7 @@ function renderInvoicesTable(D) {
     </tr>`;
   }).join('');
 }
-
+ 
 function renderLifetimeTable(D) {
   const sales = D['qbo-sales'] || {};
   const tbody = document.querySelector('#t-lifetime tbody');
