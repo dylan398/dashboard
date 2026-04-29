@@ -28,10 +28,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js"></script>
-<script src="../core/utils.js"></script>
-<script src="../core/dash.js"></script>
-<script src="../core/nav.js"></script>
+<script src="../core/firebase.js?v=10"></script>
+<script src="../core/utils.js?v=10"></script>
+<script src="../core/gc-segmentation.js?v=10"></script>
+<script src="../core/dash.js?v=10"></script>
+<script src="../core/nav.js?v=10"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -237,30 +238,96 @@ function renderInsights(D) {
 }
  
 // ── 2. Margin trajectory ──────────────────────────────────────────
+// Partial years (current year YTD) are plotted but visually demoted —
+// dashed line, hollow point, label "(YTD through Apr)". This prevents
+// the eye-tracking-the-line illusion that 2026's sub-12-month GM% is
+// a fair comparison point against full-year history. See CONTEXT.md
+// §2.4 — TX striping is heavily seasonal so partial-year ratios are
+// distorted by the denominator effect of fixed costs against suppressed
+// revenue.
 function renderMargins(D) {
   const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];
+  const years = statuses.map(s => s.year);
+  const labels = statuses.map(s => s.complete ? s.year : `${s.year}\n(YTD ${s.monthName||''})`);
   const ctx = document.getElementById('chart-margins');
   if (charts.margins) charts.margins.destroy();
+ 
+  // Render partial years as hollow points / dashed segments
+  const pointStyle = statuses.map(s => s.complete ? 'circle' : 'circleStar');
+  const ptRadius   = statuses.map(s => s.complete ? 4 : 5);
+  const ptBorder   = statuses.map(s => s.complete ? 0 : 2);
+ 
   charts.margins = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: years,
+      labels,
       datasets: [
-        { label: 'Gross Margin %', data: years.map(y => all[y].grossMarginPct), borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
-        { label: 'Net Margin %',   data: years.map(y => all[y].netMarginPct),   borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33', tension: 0.3, borderWidth: 2, pointRadius: 4 },
+        { label: 'Gross Margin %',
+          data: years.map(y => all[y].grossMarginPct),
+          borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33',
+          tension: 0.3, borderWidth: 2,
+          pointRadius: ptRadius, pointStyle,
+          pointBackgroundColor: statuses.map(s => s.complete ? CHART_COLORS.green : '#0d0f14'),
+          pointBorderColor: CHART_COLORS.green, pointBorderWidth: ptBorder,
+          segment: { borderDash: ctx => statuses[ctx.p1DataIndex] && !statuses[ctx.p1DataIndex].complete ? [6, 4] : [] },
+        },
+        { label: 'Net Margin %',
+          data: years.map(y => all[y].netMarginPct),
+          borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33',
+          tension: 0.3, borderWidth: 2,
+          pointRadius: ptRadius, pointStyle,
+          pointBackgroundColor: statuses.map(s => s.complete ? CHART_COLORS.yellow : '#0d0f14'),
+          pointBorderColor: CHART_COLORS.yellow, pointBorderWidth: ptBorder,
+          segment: { borderDash: ctx => statuses[ctx.p1DataIndex] && !statuses[ctx.p1DataIndex].complete ? [6, 4] : [] },
+        },
       ],
     },
     options: { responsive: true, maintainAspectRatio: false,
-      scales: { y: { ticks: { callback: v => v + '%' } } } },
+      scales: { y: { ticks: { callback: v => v + '%' } } },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            afterLabel: (c) => {
+              const s = statuses[c.dataIndex];
+              if (!s || s.complete) return '';
+              return `Partial year — only ${s.monthsCovered} of 12 months. Q1 is normally weakest in TX striping; comparing this point to full-year ratios is misleading.`;
+            },
+          },
+        },
+      },
+    },
   });
 }
  
 function renderMarginBands(D) {
   const pl = _latestAnnualPL(D);
-  if (!pl) { document.getElementById('margin-bands').innerHTML = '<div class="empty-state">No P&L yet.</div>'; return; }
+  if (!pl) { document.getElementById('margin-bands').innerHTML = '<div class="empty-state">No P&L yet — banding waits on a complete year.</div>'; return; }
+  // pl is guaranteed complete-year by _latestAnnualPL.
   const gm = pl.grossMarginPct ?? 0;
   const nm = pl.netMarginPct ?? 0;
+  const yr = pl._year || '';
+  // Surface YTD-vs-PY-same-period as a separate, non-banded summary so
+  // Dylan can see "where we are right now" without it being graded
+  // against full-year industry medians.
+  const ytd = (typeof ytdVsPriorSamePeriod === 'function') ? ytdVsPriorSamePeriod(D) : null;
+  const ytdRow = ytd ? `
+    <div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)">
+      <div style="font-family:var(--font-display);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:8px">YTD ${ytd.year} through ${ytd.monthName} <span style="text-transform:none;letter-spacing:0;color:var(--txt-muted)">— vs same months ${parseInt(ytd.year,10)-1}, NOT banded against full-year industry medians</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="color:var(--txt-secondary);font-size:13px">YTD revenue</span>
+        <span style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--txt-primary)">${fmtK(ytd.cy.revenue)}</span>
+      </div>
+      ${ytd.py ? `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="color:var(--txt-muted);font-size:12px">PY same months</span>
+        <span style="font-family:var(--font-mono);font-size:13px;color:var(--txt-muted)">${fmtK(ytd.py.revenue)}</span>
+      </div>` : ''}
+      ${ytd.yoyRevenuePct != null ? `<div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="color:var(--txt-secondary);font-size:13px">YoY same-period</span>
+        <span style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:${ytd.yoyRevenuePct>=0?'var(--green)':'var(--orange)'}">${ytd.yoyRevenuePct>=0?'+':''}${ytd.yoyRevenuePct}%</span>
+      </div>` : ''}
+      <div style="margin-top:8px;font-size:11px;color:var(--txt-muted);line-height:1.5">YTD GM% / NM% intentionally omitted — partial-year ratios distort the denominator (fixed costs against suppressed seasonal revenue) and aren't comparable to industry medians.</div>
+    </div>` : '';
   const band = (val, levels, labels) => {
     if (val < levels.weak) return { color: 'red', label: labels[0] };
     if (val < levels.healthy) return { color: 'orange', label: labels[1] };
@@ -270,6 +337,7 @@ function renderMarginBands(D) {
   const gmB = band(gm, BANDS.grossMargin, ['below industry', 'thin', 'healthy', 'strong']);
   const nmB = band(nm, BANDS.netMargin,   ['below industry', 'thin', 'healthy', 'top-quartile']);
   document.getElementById('margin-bands').innerHTML = `
+    <div style="font-family:var(--font-display);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:10px">Last complete year: <span style="color:var(--txt-primary);font-weight:600">${yr}</span></div>
     <div style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
         <span style="color:var(--txt-secondary);font-size:13px">Gross margin</span>
@@ -284,6 +352,7 @@ function renderMarginBands(D) {
       </div>
       <div style="font-size:11px;color:var(--txt-muted)">${nmB.label} · sub-industry median 5–10%, top decile >20%</div>
     </div>
+    ${ytdRow}
     <div style="margin-top:14px;padding:10px;background:var(--bg-hover);border-left:2px solid var(--blue);font-size:11px;color:var(--txt-muted);line-height:1.5">
       Industry add for a competitive bid: 30–40% over estimated cost. Less means buying market share, not generating profit.
     </div>`;
@@ -321,30 +390,46 @@ function renderOpexProductivity(D) {
 }
  
 // ── 4. Crew productivity ──────────────────────────────────────────
+// Labor leverage is a ratio whose denominator (labor cost) is mostly
+// fixed and whose numerator (revenue) is heavily seasonal — so a YTD
+// data point looks much worse than the eventual full-year number. We
+// still plot it (it's data, hide it and we can't show pace), but
+// visually demote it: hatched bar, "(YTD …)" suffix on the label, and
+// a tooltip note that the partial-year ratio isn't comparable to the
+// other bars on this chart.
 function renderLabor(D) {
   const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
-  const series = years.map(y => {
-    const p = all[y];
+  const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];
+  const series = statuses.map(s => {
+    const p = all[s.year];
     const wagesCogs = (p.cogs || {})['Wages_COGS_'] || (p.cogs || {})['Wages(COGS)'] || 0;
     const salariesOpex = (p.opex || {})['Salaries___Wages'] || (p.opex || {})['Salaries & Wages'] || 0;
     const totalLabor = wagesCogs + salariesOpex;
     const rev = p.revenue || 0;
     return {
-      year: y, revenue: rev, labor: totalLabor, wagesCogs, salariesOpex,
+      year: s.year, isComplete: s.complete, monthsCovered: s.monthsCovered, monthName: s.monthName,
+      revenue: rev, labor: totalLabor, wagesCogs, salariesOpex,
       revPerLabor: totalLabor > 0 ? +(rev / totalLabor).toFixed(2) : null,
     };
   });
   const ctx = document.getElementById('chart-labor');
   if (charts.labor) charts.labor.destroy();
+  // Helpers to color partial-year bars greyed-out so they read as "not
+  // a comparison number."
+  const barFill   = (s) => s.isComplete
+    ? ((s.revPerLabor || 0) >= 3 ? CHART_COLORS.green + 'aa' : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow + 'aa' : CHART_COLORS.red + 'aa')
+    : 'rgba(138,144,160,.30)';
+  const barEdge   = (s) => s.isComplete
+    ? ((s.revPerLabor || 0) >= 3 ? CHART_COLORS.green : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow : CHART_COLORS.red)
+    : '#8a90a0';
   charts.labor = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: series.map(s => s.year),
+      labels: series.map(s => s.isComplete ? s.year : `${s.year} (YTD ${s.monthName||''})`),
       datasets: [
         { label: 'Revenue per Labor $', data: series.map(s => s.revPerLabor),
-          backgroundColor: series.map(s => (s.revPerLabor || 0) >= 3 ? CHART_COLORS.green + 'aa' : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow + 'aa' : CHART_COLORS.red + 'aa'),
-          borderColor: series.map(s => (s.revPerLabor || 0) >= 3 ? CHART_COLORS.green : (s.revPerLabor || 0) >= 2 ? CHART_COLORS.yellow : CHART_COLORS.red),
+          backgroundColor: series.map(barFill),
+          borderColor: series.map(barEdge),
           borderWidth: 1 },
       ],
     },
@@ -352,12 +437,19 @@ function renderLabor(D) {
       scales: { y: { ticks: { callback: v => '$' + v.toFixed(2) } } },
       plugins: { tooltip: { callbacks: {
         label: c => '$' + c.parsed.y + ' rev / $1 labor',
-        afterLabel: c => `Rev: ${fmtK(series[c.dataIndex].revenue)}, Labor: ${fmtK(series[c.dataIndex].labor)}`,
+        afterLabel: c => {
+          const s = series[c.dataIndex];
+          const base = `Rev: ${fmtK(s.revenue)}, Labor: ${fmtK(s.labor)}`;
+          if (s.isComplete) return base;
+          return base + `\nPartial year — ${s.monthsCovered} of 12 months. Not comparable to full-year bars; revenue is suppressed by seasonality (Q1 normally weakest in TX striping) while labor cost is roughly constant.`;
+        },
       } } } },
   });
  
-  // Right panel — labor mix for latest year
-  const latest = series[series.length - 1];
+  // Right panel — labor mix for latest *complete* year (not YTD; mix
+  // shifts month-to-month, so a partial year wouldn't represent the
+  // full annual mix).
+  const latest = [...series].reverse().find(s => s.isComplete) || series[series.length - 1];
   document.getElementById('labor-period').textContent = latest?.year || '';
   if (latest && latest.labor > 0) {
     document.getElementById('labor-mix').innerHTML = `
