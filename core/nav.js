@@ -10,6 +10,7 @@ const NAV_PAGES = [
   { id: 'customers', label: 'Customers', href: '/dashboard/reports/customers.html' },
   { id: 'vendors',   label: 'Vendors',   href: '/dashboard/reports/vendors.html' },
   { id: 'pipeline',  label: 'Pipeline',  href: '/dashboard/reports/pipeline.html' },
+  { id: 'outreach',  label: 'Outreach',  href: '/dashboard/reports/outreach.html' },
 ];
 const NAV_OPS = [
   { id: 'viewer',  label: 'Viewer',  href: '/dashboard/viewer.html' },
