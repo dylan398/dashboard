@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   Vendors & AP — informational, with SBA-loan context.
- 
+
   ▶ Read docs/CONTEXT.md §2.1 (AP differs from AR) and §8.0 before editing.
- 
+
     AP "past due" framing IS appropriate here — vendors have enforceable
     terms unlike SFS's customers — but the cash flow constraints are
     being addressed by the SBA loan in progress. So:
@@ -31,7 +31,7 @@
 <main class="main">
   <div class="page-title">Vendors & AP</div>
   <div class="page-sub">Accounts payable aging, top vendors, payable trends.</div>
- 
+
   <div class="page-note blue">
     <b>How AP differs from AR:</b> these are bills SFS needs to pay. Past-due here is more meaningful than for AR
     — vendors expect payment per their terms. <b>However</b>, current cash constraints are being addressed by the
@@ -39,14 +39,14 @@
     alarms. Watch the 31–60+ buckets and the long-term Notes Payable schedule on the Cash page; revisit framing
     once the loan funds.
   </div>
- 
+
   <div id="empty-state" class="empty-state" style="display:none">
     No vendor data yet. Go to <a href="../admin.html">Admin</a> and upload an A/P Aging Summary.
   </div>
- 
+
   <div id="content" style="display:none">
     <div class="kpi-row cols-5" id="kpi-row"></div>
- 
+
     <div class="grid-2">
       <div class="panel">
         <div class="panel-title"><span>AP Aging Buckets</span><span class="meta" id="ap-asof">—</span></div>
@@ -57,21 +57,21 @@
         <div class="chart-wrap h260"><canvas id="chart-ap-trend"></canvas></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Top Vendors</span></div>
     <div class="panel flush">
       <div class="t-scroll"><table class="t" id="t-vendors"><thead><tr><th>#</th><th>Vendor</th><th class="num">Total AP</th><th class="num">Current</th><th class="num">1–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">91+</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </main>
- 
+
 <script>
 injectNavStyles();
 renderNav('vendors');
 setupChartTheme();
- 
+
 let charts = {};
- 
+
 loadDashboard((D, raw) => {
   const ap = D?.['qbo-ap-aging'];
   if (!ap || !ap.summary) {
@@ -81,13 +81,13 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
- 
+
   renderKPIs(D);
   renderAgingBlock(ap);
   renderAPTrend(D);
   renderVendorsTable(ap);
 });
- 
+
 function renderKPIs(D) {
   const ap = D['qbo-ap-aging'];
   const bs = D['qbo-bs'] || {};
@@ -108,7 +108,7 @@ function renderKPIs(D) {
     kpi('AP on BS', fmtK(bs.ap), { color: 'orange', sub: 'from latest balance sheet' }),
   ].join('');
 }
- 
+
 function renderAgingBlock(ap) {
   document.getElementById('ap-asof').textContent = ap.meta?.period || '—';
   const total = ap.summary?.total || 0;
@@ -130,7 +130,7 @@ function renderAgingBlock(ap) {
     </div>`;
   }).join('');
 }
- 
+
 function renderAPTrend(D) {
   const all = D['qbo-ap-aging_all'] || {};
   const dates = Object.keys(all).sort();
@@ -150,7 +150,7 @@ function renderAPTrend(D) {
       scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
   });
 }
- 
+
 function renderVendorsTable(ap) {
   const tbody = document.querySelector('#t-vendors tbody');
   if (!ap.vendors || ap.vendors.length === 0) {

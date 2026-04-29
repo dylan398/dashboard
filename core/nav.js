@@ -1,7 +1,7 @@
 // Multi-report navigation header. Each page calls renderNav('<active-id>')
 // after the body loads. Pages live in / or /reports/, so we resolve href
 // based on whether the current page is inside the reports/ subdirectory.
- 
+
 const NAV_PAGES = [
   { id: 'overview',  label: 'Overview',  href: '/dashboard/' },
   { id: 'insights',  label: 'Insights',  href: '/dashboard/reports/insights.html' },
@@ -16,7 +16,7 @@ const NAV_OPS = [
   { id: 'viewer',  label: 'Viewer',  href: '/dashboard/viewer.html' },
   { id: 'admin',   label: 'Admin',   href: '/dashboard/admin.html' },
 ];
- 
+
 function renderNav(activeId) {
   const link = (p) => {
     const active = p.id === activeId
@@ -26,7 +26,7 @@ function renderNav(activeId) {
   };
   const reportLinks = NAV_PAGES.map(link).join('');
   const opLinks     = NAV_OPS.map(link).join('');
- 
+
   const html = `
   <header class="header">
     <div class="header-left">
@@ -42,9 +42,9 @@ function renderNav(activeId) {
       <span id="status-label">Connecting…</span>
     </div>
   </header>`;
- 
+
   document.body.insertAdjacentHTML('afterbegin', html);
- 
+
   // Live Firebase connection indicator
   if (typeof getDB === 'function') {
     getDB().ref('.info/connected').on('value', snap => {
@@ -56,7 +56,7 @@ function renderNav(activeId) {
     });
   }
 }
- 
+
 // Inject the standard nav stylesheet — every page calls this once so we don't
 // duplicate the same CSS in every HTML file.
 function injectNavStyles() {

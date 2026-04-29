@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
   Revenue & Profit — multi-year P&L with partial-year flagging.
- 
+
   ▶ Read docs/CONTEXT.md §2.4 (partial-year), §8.0 (Actionability Rule)
     before editing.
- 
+
     Conventions:
     • All charts that include the current year flag it as YTD (greyed
       bars, dashed line segments, "(YTD …)" label).
@@ -34,14 +34,14 @@
 <main class="main">
   <div class="page-title">Revenue & Profit</div>
   <div class="page-sub">Annual P&L trend, monthly run rate, OpEx breakdown, labor leverage. Partial-year (YTD) data is flagged.</div>
- 
+
   <div id="empty-state" class="empty-state" style="display:none">
     No P&L data yet. Go to <a href="../admin.html">Admin</a> and upload a Profit and Loss CSV.
   </div>
- 
+
   <div id="content" style="display:none">
     <div class="kpi-row cols-6" id="kpi-row"></div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Annual Trend</span><span class="hint">YTD bars greyed; complete years coloured</span></div>
     <div class="grid-2">
       <div class="panel">
@@ -54,7 +54,7 @@
         <div class="cap">YTD margins are intentionally omitted — partial-year ratios distort the denominator (fixed costs against suppressed seasonal revenue) and aren't comparable to complete-year history.</div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Monthly Run Rate (current year)</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px" id="mly-meta">—</span></div>
     <div class="grid-2">
       <div class="panel">
@@ -70,7 +70,7 @@
         <div class="cap" id="seasonal-cap">—</div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Labor Leverage</span><span class="hint">Revenue per dollar of labor (Wages COGS + Salaries OpEx)</span></div>
     <div class="grid-2">
       <div class="panel">
@@ -83,7 +83,7 @@
         <div id="labor-mix"></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Year-by-Year P&L</span><span class="year-pick" id="year-pick"></span></div>
     <div class="grid-6040">
       <div class="panel">
@@ -95,22 +95,22 @@
         <div class="chart-wrap h360"><canvas id="chart-opex"></canvas></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>EBITDA</span></div>
     <div class="panel">
       <div class="chart-wrap h220"><canvas id="chart-ebitda"></canvas></div>
     </div>
   </div>
 </main>
- 
+
 <script>
 injectNavStyles();
 renderNav('pl');
 setupChartTheme();
- 
+
 let charts = {};
 let currentData = null;
- 
+
 loadDashboard((D, raw) => {
   if (!D || !D['qbo-pl_all'] || Object.keys(D['qbo-pl_all']).length === 0) {
     document.getElementById('empty-state').style.display = 'block';
@@ -120,7 +120,7 @@ loadDashboard((D, raw) => {
   currentData = D;
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
- 
+
   renderKPIs(D);
   renderTrendChart(D);
   renderMarginChart(D);
@@ -132,7 +132,7 @@ loadDashboard((D, raw) => {
   renderYearDetail(D, latestYr);
   renderEbitdaChart(D);
 });
- 
+
 // ── KPIs — partial-year aware
 function renderKPIs(D) {
   const all = D['qbo-pl_all'];
@@ -143,7 +143,7 @@ function renderKPIs(D) {
   // Last *complete* year for banded ratios
   const completePL = (typeof _latestAnnualPL === 'function') ? _latestAnnualPL(D) : null;
   const completeYr = completePL?._year || '—';
- 
+
   // Same-period YoY
   const ytd = (typeof ytdVsPriorSamePeriod === 'function') ? ytdVsPriorSamePeriod(D) : null;
   const revSubtitle = (() => {
@@ -161,14 +161,14 @@ function renderKPIs(D) {
     }
     return 'partial year';
   })();
- 
+
   const kpi = (label, value, opts = {}) => `
     <div class="kpi ${opts.partial ? 'partial' : ''}" style="--kpi-color:var(--${opts.color || 'border-bright'})">
       <div class="kpi-label">${label}</div>
       <div class="kpi-value ${opts.color || ''}">${value}</div>
       <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
     </div>`;
- 
+
   document.getElementById('kpi-row').innerHTML = [
     kpi(`Revenue ${latestYr || ''}`, fmtK(latest.revenue), { color: 'yellow', sub: revSubtitle, partial: !latestStatus.complete }),
     kpi(`Gross Margin (${completeYr})`, completePL?.grossMarginPct != null ? completePL.grossMarginPct.toFixed(1) + '%' : '—',
@@ -183,7 +183,7 @@ function renderKPIs(D) {
     kpi('Years tracked', yearKeys.length, { color: 'blue', sub: yearKeys[0] + '–' + yearKeys[yearKeys.length - 1] }),
   ].join('');
 }
- 
+
 // ── Trend bar chart, partial year hatched
 function renderTrendChart(D) {
   const all = D['qbo-pl_all'] || {};
@@ -224,7 +224,7 @@ function renderTrendChart(D) {
       } } } },
   });
 }
- 
+
 // ── Margin chart — complete years only
 function renderMarginChart(D) {
   const all = D['qbo-pl_all'] || {};
@@ -240,7 +240,7 @@ function renderMarginChart(D) {
     options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => v + '%' } } } },
   });
 }
- 
+
 // ── Monthly run rate (current YTD)
 function renderMonthlyChart(D) {
   const monthly = D['qbo-pl-monthly'] || {};
@@ -269,7 +269,7 @@ function renderMonthlyChart(D) {
       plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
   });
 }
- 
+
 // ── CY vs PY same months (apples-to-apples)
 function renderSeasonalChart(D) {
   const ctx = document.getElementById('chart-seasonal');
@@ -300,7 +300,7 @@ function renderSeasonalChart(D) {
     },
   });
 }
- 
+
 // ── Labor leverage chart + mix panel
 function renderLabor(D) {
   const all = D['qbo-pl_all'] || {};
@@ -345,7 +345,7 @@ function renderLabor(D) {
         },
       } } } },
   });
- 
+
   // Right panel — labor mix for latest *complete* year
   const latest = [...series].reverse().find(s => s.isComplete) || series[series.length - 1];
   document.getElementById('labor-period').textContent = latest?.year || '';
@@ -361,7 +361,7 @@ function renderLabor(D) {
     el.innerHTML = '<div class="empty">No labor detail in this period.</div>';
   }
 }
- 
+
 function renderYearPicker(D) {
   const all = D['qbo-pl_all'] || {};
   const years = Object.keys(all).sort();
@@ -371,7 +371,7 @@ function renderYearPicker(D) {
     return `<button onclick="renderYearDetail(currentData, '${y}')" class="${y === latest ? 'active' : ''} ${status.complete ? '' : 'partial'}" data-yr="${y}">${y}</button>`;
   }).join('');
 }
- 
+
 function renderYearDetail(D, yr) {
   const data = D['qbo-pl_all']?.[yr] || {};
   const status = (typeof _yearStatus === 'function') ? _yearStatus(D, yr) : { complete: true };
@@ -407,7 +407,7 @@ function renderYearDetail(D, yr) {
         tooltip: { callbacks: { label: c => c.label + ': ' + fmt(c.parsed) } } } },
   });
 }
- 
+
 function renderEbitdaChart(D) {
   const all = D['qbo-pl_all'] || {};
   const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];

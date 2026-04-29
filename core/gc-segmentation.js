@@ -20,7 +20,7 @@
 // get renamed to the real GC in Knowify after award — so the apparent
 // 0% win rate is a Knowify reporting artifact, not a real signal. It's
 // re-tagged 'DATA-ARTIFACT' below so reports can show it that way.
- 
+
 (function(){
 const M = {};
 M['20twentyconstruction']={raw:'20twenty construction',group:'B',count:11};
@@ -221,7 +221,7 @@ M['wilcocommercial']={raw:'Wilco Commercial',group:'C-MIX',count:10};
 M['wrlgeneralcontractorsllc']={raw:'WRL General Contractors, LLC.',group:'C-PUB',count:12};
 M['wyattmanagement']={raw:'WYATT MANAGEMENT',group:'C-STOP',count:31};
 M['zerncoinc']={raw:'Zernco Inc',group:'CHAIN',count:24};
- 
+
 const CHAINS = [
   {brand:'Starbucks',bids:22,wins:6,wr:'27.3%',pursuit:'PURSUE — Highest WR of any chain. No locked sub.',bestPath:'Deepen relationship with Preston Pierce Construction (4 wins). Also Menemsha Development and Net Leased Mgmt.',contactTarget:'Preston Pierce Construction (primary)',wonThrough:'Preston Pierce Construction, Menemsha Development Group, Net Leased Management'},
   {brand:'Casey\'s',bids:18,wins:4,wr:'22.2%',pursuit:'PURSUE — 22% WR through Zernco specifically.',bestPath:'Ask Zernco Inc about upcoming Casey\'s pipeline. They have 3 wins. National Convenience Solutions also delivered a win.',contactTarget:'Zernco Inc (primary)',wonThrough:'Zernco Inc, National Convenience Solutions'},
@@ -236,9 +236,9 @@ const CHAINS = [
   {brand:'CVS',bids:57,wins:0,wr:'0.0%',pursuit:'STOP — 0 wins. Summit Properties likely has locked preferred sub.',bestPath:'Stop bidding through GCs. If pursuing: CVS corporate facilities team directly.',contactTarget:'CVS corporate (only if pursuing brand directly)',wonThrough:'—'},
   {brand:'Brakes Plus',bids:54,wins:0,wr:'0.0%',pursuit:'STOP — 0 wins across all GCs.',bestPath:'Stop bidding. Franchisee GC model with locked sub agreements.',contactTarget:'N/A — stop bidding',wonThrough:'—'},
 ];
- 
+
 function _norm(s){ return (s||"").toString().toLowerCase().replace(/[^a-z0-9]+/g,""); }
- 
+
 // ─────────────────────────────────────────────────────────────────────────
 // GC name aliases — same GC entered under multiple names in Knowify get
 // merged into a single canonical record. Add new aliases here as Dylan
@@ -252,13 +252,13 @@ const ALIASES = {
   'jpi':           'JPI Companies',
   'jpicompanies':  'JPI Companies',
 };
- 
+
 window.canonicalGCName = function(name){
   if (!name) return name;
   const n = _norm(name);
   return ALIASES[n] || name.toString().trim();
 };
- 
+
 // Returns classification entry or null. For Group A we DON'T hardcode -
 // it's derived dynamically from Knowify win rate (>= 70% & >= 5 bids).
 window.classifyGC = function(name){
@@ -267,7 +267,7 @@ window.classifyGC = function(name){
   const n = _norm(canon);
   return M[n] || null;
 };
- 
+
 window.GC_CLASSIFICATION = M;
 window.NATIONAL_CHAINS    = CHAINS;
 window.GC_ALIASES         = ALIASES;

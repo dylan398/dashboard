@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
   Cash & Balance Sheet — informational framing.
- 
+
   ▶ Read docs/CONTEXT.md §8.0 (Actionability Rule) before editing.
- 
+
     Cash flow is being addressed by the SBA loan that's currently in
     progress. Per Dylan's explicit direction: "the cash flow currently
     is bad. An SBA loan is currently in the works to fix that. So
     there's no use harping on it."
- 
+
     Implications:
     • NO alarm coloring on cash, working capital, or DSCR KPIs.
     • DSCR / loan-readiness shown as informational metrics, NOT alarms.
@@ -38,7 +38,7 @@
 <main class="main">
   <div class="page-title">Cash & Balance Sheet</div>
   <div class="page-sub">Cash trajectory, working capital, debt schedule, balance sheet at any snapshot.</div>
- 
+
   <div class="page-note">
     <b>Framing note:</b> SFS's near-term cash position is being addressed by the SBA loan currently in progress.
     This page shows the numbers faithfully — they're context for the loan narrative — but does <b>not</b>
@@ -46,14 +46,14 @@
     (collect AR faster, defer vendor payments, raise capital) are inside SFS's control on a Q1-2026 timeline.
     Once the SBA loan lands the same numbers will read very differently; the page reframes naturally then.
   </div>
- 
+
   <div id="empty-state" class="empty-state" style="display:none">
     No balance sheet data yet. Go to <a href="../admin.html">Admin</a> to upload Balance Sheet and Cash Flow.
   </div>
- 
+
   <div id="content" style="display:none">
     <div class="kpi-row cols-6" id="kpi-row"></div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Cash Trajectory</span></div>
     <div class="grid-2">
       <div class="panel">
@@ -66,7 +66,7 @@
         <div class="cap" id="cf-cap">YTD years are partial — operating CF for the current year is suppressed by Q1 seasonality. Compare to PY same months for a fair read.</div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Working Capital & Liquidity</span></div>
     <div class="grid-3">
       <div class="panel">
@@ -82,7 +82,7 @@
         <div class="chart-wrap h220"><canvas id="chart-de"></canvas></div>
       </div>
     </div>
- 
+
     <div class="section-label">
       <span><span class="accent">▸</span>Balance Sheet Snapshot</span>
       <span style="display:flex;align-items:center;gap:8px"><label class="muted" style="font-family:var(--font-mono);font-size:10px">As of:</label><select id="snap-pick" class="snapshot-pick"></select></span>
@@ -100,7 +100,7 @@
         <table class="t" id="t-lt-debt"></table>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Cash Flow Statement</span><span class="year-pick" id="cf-year-pick"></span></div>
     <div class="panel">
       <div class="panel-title"><span>Statement of Cash Flows</span><span class="meta" id="cf-period">—</span></div>
@@ -108,15 +108,15 @@
     </div>
   </div>
 </main>
- 
+
 <script>
 injectNavStyles();
 renderNav('cash');
 setupChartTheme();
- 
+
 let charts = {};
 let cD = null;
- 
+
 loadDashboard((D, raw) => {
   if (!D || (!D['qbo-bs_all'] && !D['qbo-cf_all'])) {
     document.getElementById('empty-state').style.display = 'block';
@@ -126,7 +126,7 @@ loadDashboard((D, raw) => {
   cD = D;
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
- 
+
   renderKPIs(D);
   renderCashChart(D);
   renderCFChart(D);
@@ -138,7 +138,7 @@ loadDashboard((D, raw) => {
   const latestCF = Object.keys(D['qbo-cf_all'] || {}).sort().reverse()[0];
   if (latestCF) renderCF(latestCF);
 });
- 
+
 // ── KPIs — all neutral coloring (no alarm framing per §8.0)
 function renderKPIs(D) {
   const bs = D['qbo-bs'] || {};
@@ -148,18 +148,18 @@ function renderKPIs(D) {
   const dates = Object.keys(snaps).sort();
   const earlyCash = dates.length > 1 ? snaps[dates[0]].cash : null;
   const cashChange = (bs.cash != null && earlyCash != null) ? bs.cash - earlyCash : null;
- 
+
   // Detect partial-year for the operating-CF KPI
   const cfYear = cf.meta?.period?.match(/\d{4}/)?.[0];
   const cfStatus = (cfYear && typeof _yearStatus === 'function') ? _yearStatus(D, cfYear) : { complete: true };
- 
+
   const kpi = (label, value, opts = {}) => `
     <div class="kpi ${opts.partial ? 'partial' : ''}" style="--kpi-color:var(--${opts.color || 'border-bright'})">
       <div class="kpi-label">${label}</div>
       <div class="kpi-value ${opts.color || ''}">${value}</div>
       <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
     </div>`;
- 
+
   document.getElementById('kpi-row').innerHTML = [
     kpi('Cash', fmtK(bs.cash), { color: 'yellow', sub: bs.meta?.period || '' }),
     kpi('Working Capital', fmtK(bs.workingCapital), { color: 'yellow', sub: ratios?.currentRatio ? ratios.currentRatio + 'x current ratio' : '' }),
@@ -170,7 +170,7 @@ function renderKPIs(D) {
       { color: 'blue', sub: dates.length > 1 ? `${dates[0]} → ${dates[dates.length-1]}` : '' }),
   ].join('');
 }
- 
+
 function renderCashChart(D) {
   const snaps = D['qbo-bs_all'] || {};
   const dates = Object.keys(snaps).sort();
@@ -188,7 +188,7 @@ function renderCashChart(D) {
       plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
   });
 }
- 
+
 // ── Cash flow chart — partial year flagged
 function renderCFChart(D) {
   const all = D['qbo-cf_all'] || {};
@@ -230,7 +230,7 @@ function renderCFChart(D) {
       } } } },
   });
 }
- 
+
 function renderWCCharts(D) {
   const snaps = D['qbo-bs_all'] || {};
   const dates = Object.keys(snaps).sort();
@@ -256,7 +256,7 @@ function renderWCCharts(D) {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
   });
 }
- 
+
 function renderSnapshotPicker(D) {
   const snaps = D['qbo-bs_all'] || {};
   const dates = Object.keys(snaps).sort().reverse();
@@ -265,7 +265,7 @@ function renderSnapshotPicker(D) {
   ).join('');
   document.getElementById('snap-pick').onchange = (e) => renderSnapshot(e.target.value);
 }
- 
+
 function renderSnapshot(dateKey) {
   const bs = cD['qbo-bs_all']?.[dateKey] || {};
   document.getElementById('bs-period').textContent = bs.meta?.period || dateKey;
@@ -301,7 +301,7 @@ function renderSnapshot(dateKey) {
      <tr class="total"><td>Total LT Debt</td><td class="num">${fmt(bs.longTermLiab)}</td></tr></tbody>` :
     '<tbody><tr><td class="empty-state" colspan="2">No long-term debt detail.</td></tr></tbody>';
 }
- 
+
 function renderCFYearPicker(D) {
   const all = D['qbo-cf_all'] || {};
   const years = Object.keys(all).sort();
@@ -311,7 +311,7 @@ function renderCFYearPicker(D) {
     return `<button onclick="renderCF('${y}')" class="${y === latest ? 'active' : ''} ${status.complete ? '' : 'partial'}" data-yr="${y}">${y}</button>`;
   }).join('');
 }
- 
+
 function renderCF(yr) {
   const cf = cD['qbo-cf_all']?.[yr] || {};
   const status = (typeof _yearStatus === 'function') ? _yearStatus(cD, yr) : { complete: true };

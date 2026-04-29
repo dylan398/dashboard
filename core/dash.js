@@ -12,18 +12,18 @@
      3. Every derived metric the reports use (DSO, concentration, runway, …)
      4. Cross-data combinations (customer × AR × pipeline, etc.)
      5. Auto-generated business insights
- 
+
    ────────────────────────────────────────────────────────────────────────
    FOR FUTURE CLAUDE CHATS — READ THIS BEFORE TOUCHING REPORTING LOGIC
    ────────────────────────────────────────────────────────────────────────
- 
+
    The business: Semper Fi Striping LLC — a Texas pavement-marking
    subcontractor (DFW/Weatherford). SDVOSB-certified. Three owners:
    Dylan Petty (CEO), Tyler Petty (COO), James Thetford (CRO). They sell
    striping/sealcoating/ADA work mostly to general contractors (GCs). A
    single project may be bid through 3+ GCs simultaneously, and only one
    GC wins the prime contract — that affects how we measure win rate.
- 
+
    Industry rules that change interpretation:
    ────────────────────────────────────────
    • PAST DUE IS NOT AN ALARM. In TX construction subcontracting an invoice
@@ -33,7 +33,7 @@
      aging buckets as informational time bands, not collections alarms.
      daysToPayStats() and the customers.html page are the canonical
      example of this framing.
- 
+
    • KNOWIFY DATA IS DIRTY. SFS uses Knowify in non-standard ways and the
      export reflects that. Four rules + one annotation reshape it before
      win-rate calculations:
@@ -56,25 +56,25 @@
           (the GC just didn't win the prime).
      applyKnowifyRules() is the single implementation. Don't re-implement
      this in report pages — call it.
- 
+
    ────────────────────────────────────────────────────────────────────────
    DATA SHAPES IN FIREBASE
    ────────────────────────────────────────────────────────────────────────
- 
+
    Three storage strategies (defined in core/firebase.js):
- 
+
      PERIOD ─ one record per period (e.g., one P&L per year). Path:
        dashboard/{datasetId}/periods/{periodKey}
        dashboard/{datasetId}/latest                 ← pointer
- 
+
      SNAPSHOT ─ every dated snapshot kept forever (e.g., BS as-of dates).
        dashboard/{datasetId}/snapshots/{dateKey}
        dashboard/{datasetId}/latestDate             ← pointer
- 
+
      MERGE ─ accumulating data merged at write time (sales monthly,
        transaction accounts, knowify summary). Path:
        dashboard/{datasetId}/                       ← flat, no sub-key
- 
+
    Datasets and their strategies:
      qbo-pl              period (annual)    Profit & Loss
      qbo-pl-monthly      period (annual)    P&L by Month (current year)
@@ -86,56 +86,56 @@
      qbo-ap-aging        snapshot (date)    A/P Aging Summary
      qbo-open-invoices   snapshot (date)    Open Invoices (richer than AR Aging)
      knowify-jobs        merge              Knowify Advanced Jobs Report
- 
+
    normalizeDashboardData(raw) collapses these into a flat object where
    each dataset is the LATEST period/snapshot, plus *_all containing the
    full history. Reports almost always call this via loadDashboard().
- 
+
    ────────────────────────────────────────────────────────────────────────
    CROSS-DATA COMBINATIONS THIS FILE COMPUTES
    ────────────────────────────────────────────────────────────────────────
- 
+
    These are the joins that turn raw datasets into business meaning:
- 
+
      Customer × AR × Lifetime
        Combine qbo-sales.topCustomers + qbo-open-invoices.invoices to
        compute, per customer: lifetime revenue + currently-open AR + how
        long their open invoices have been outstanding. See customerLedger().
- 
+
      Pipeline → Revenue projection
        Knowify pending bids × historical win rate = expected wins.
        Cross-check against P&L revenue trend. See pipelineProjection().
- 
+
      Cash runway
        Latest BS cash / monthly avg OpEx (from latest P&L). Translates
        balance-sheet liquidity into a time horizon. See cashRunway().
- 
+
      Debt service coverage (DSCR)
        EBITDA / annual debt service. Standard SBA threshold is ~1.25x.
        Used in the loan-readiness panel of the insights page.
- 
+
      Working capital cycle
        DSO + DIO − DPO = cash conversion cycle (in days). Inventory ~0
        for a service business so we treat this as DSO − DPO. The lower
        the better. See workingCapitalCycle().
- 
+
      Margin erosion detection
        Per-OpEx-category as % of revenue, year over year. Flags any
        category that grew >25% as % of revenue YoY. See marginErosion().
- 
+
      Customer health score
        Composite: lifetime revenue (50%), payment timeliness (30%), open
        AR not too old (20%). 0–100 score. See customerHealth().
- 
+
      Bid-funnel time analysis
        From Knowify date fields: bid created → won → invoiced → paid.
        Identifies bottlenecks. (Full implementation requires job-level
        invoice tracking we don't yet have — see partial in pipelineFunnel())
- 
+
    ────────────────────────────────────────────────────────────────────────
    ADDING NEW METRICS — RULES OF THUMB
    ────────────────────────────────────────────────────────────────────────
- 
+
    • Pure functions. Take normalized D as input. Return a value or null.
    • If a metric needs raw history, take D's *_all collections as input.
    • Always return null when inputs are missing — never NaN, never crash.
@@ -143,14 +143,14 @@
    • If a metric is composite (combines >2 datasets), call out the
      dependency chain in the comment.
    • Add the metric to insights() if it should appear on the auto-insights page.
- 
+
    ════════════════════════════════════════════════════════════════════ */
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 1 ─ DATA NORMALIZATION
 // ════════════════════════════════════════════════════════════════════════
- 
+
 /**
  * Collapses the Firebase tree into a per-dataset object where each key is
  * the LATEST period/snapshot (whatever's most recent). Also exposes the
@@ -163,7 +163,7 @@
 function normalizeDashboardData(raw) {
   if (!raw) return {};
   const out = { meta: raw.meta || {} };
- 
+
   // Period datasets: latest by pointer, fall back to chronological tail.
   ['qbo-pl', 'qbo-cf', 'qbo-pl-monthly'].forEach(id => {
     const ds = raw[id] || {};
@@ -178,7 +178,7 @@ function normalizeDashboardData(raw) {
       out[id + '_all'] = {};
     }
   });
- 
+
   // Snapshot datasets: latest by pointer, plus full snapshot history.
   ['qbo-bs', 'qbo-ar-aging', 'qbo-ap-aging', 'qbo-open-invoices'].forEach(id => {
     const ds = raw[id] || {};
@@ -193,15 +193,15 @@ function normalizeDashboardData(raw) {
       out[id + '_all'] = {};
     }
   });
- 
+
   // Merge datasets are already flat at the top level.
   out['qbo-sales']        = raw['qbo-sales']        || {};
   out['qbo-transactions'] = raw['qbo-transactions'] || {};
   out['knowify-jobs']     = raw['knowify-jobs']     || {};
- 
+
   return out;
 }
- 
+
 /** One-call data subscriber — every report uses this. */
 function loadDashboard(callback) {
   if (typeof DB === 'undefined') {
@@ -216,8 +216,8 @@ function loadDashboard(callback) {
     callback(normalizeDashboardData(raw), raw);
   });
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 2 ─ KNOWIFY RULE ENGINE
 // ════════════════════════════════════════════════════════════════════════
@@ -225,22 +225,22 @@ function loadDashboard(callback) {
 // The single implementation of Dylan's four reclassification rules. Run
 // this once per page from raw knowify.jobs and pass the result to
 // downstream renderers. Don't re-implement individual rules elsewhere.
- 
+
 const RELATIONSHIP_LEADS = ['James Thetford', 'Tyler Petty', 'Jenna Napier'];
 const STALE_BID_DAYS = 120;
- 
+
 function _knowifyDateAge(jobDateStr, asOf) {
   if (!jobDateStr) return null;
   const d = new Date(jobDateStr);
   if (isNaN(d)) return null;
   return Math.floor((asOf - d) / (1000 * 60 * 60 * 24));
 }
- 
+
 function _normalizeName(name) {
   if (!name) return '';
   return String(name).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
- 
+
 /**
  * Apply Dylan's 4 rules + multi-GC annotation. Returns:
  *   { competitive: { jobs, wins, losses, pending, winRate, dollarWinRate, … },
@@ -258,7 +258,7 @@ function applyKnowifyRules(rawJobs, opts = {}) {
     ...(rawJobs?.Bidding  || []).map(j => ({ ...j, originalStatus: 'Bidding'  })),
     ...(rawJobs?.Rejected || []).map(j => ({ ...j, originalStatus: 'Rejected' })),
   ];
- 
+
   // RULE 1+2: outcome reclassification
   const classified = all.map(j => {
     const ageDays = _knowifyDateAge(j.createdDate, asOf);
@@ -274,12 +274,12 @@ function applyKnowifyRules(rawJobs, opts = {}) {
     }
     return { ...j, ageDays, outcome, reclassReason };
   });
- 
+
   // RULE 3: relationship vs competitive split
   const isRel = j => RELATIONSHIP_LEADS.includes((j.salesLead || '').trim());
   const competitive = classified.filter(j => !isRel(j));
   const relationship = classified.filter(isRel);
- 
+
   // RULE 5: multi-GC dedup annotation (jobs grouped by normalized name)
   const projectGroups = {};
   competitive.forEach(j => {
@@ -292,7 +292,7 @@ function applyKnowifyRules(rawJobs, opts = {}) {
   const multiGCBidIds = new Set();
   multiGCProjects.forEach(g => g.bids.forEach(b => multiGCBidIds.add(b)));
   competitive.forEach(j => { j.isMultiGC = multiGCBidIds.has(j); });
- 
+
   // Headline metrics
   const decided = competitive.filter(j => j.outcome === 'win' || j.outcome === 'loss');
   const wins    = decided.filter(j => j.outcome === 'win');
@@ -303,7 +303,7 @@ function applyKnowifyRules(rawJobs, opts = {}) {
   const pendingCV = pending.reduce((s, j) => s + (j.contractTotal || 0), 0);
   const winRate       = decided.length ? +(wins.length / decided.length * 100).toFixed(1) : null;
   const dollarWinRate = (wonCV + lostCV) ? +(wonCV / (wonCV + lostCV) * 100).toFixed(1) : null;
- 
+
   // Per-GC breakdown
   const byGC = {};
   competitive.forEach(j => {
@@ -322,7 +322,7 @@ function applyKnowifyRules(rawJobs, opts = {}) {
     g.totalCV = g.wonCV + g.lostCV + g.pendingCV;
     g.winRate = (g.wins + g.losses) ? +(g.wins / (g.wins + g.losses) * 100).toFixed(1) : null;
   });
- 
+
   // Per-Sales-Lead breakdown
   const byLead = {};
   competitive.forEach(j => {
@@ -336,11 +336,11 @@ function applyKnowifyRules(rawJobs, opts = {}) {
   Object.values(byLead).forEach(l => {
     l.winRate = (l.wins + l.losses) ? +(l.wins / (l.wins + l.losses) * 100).toFixed(1) : null;
   });
- 
+
   // Relationship-channel summary
   const relWins = relationship.filter(j => j.originalStatus === 'Active' || (j.originalStatus === 'Closed' && (j.invoiced || 0) > 0));
   const relCV   = relWins.reduce((s, j) => s + (j.contractTotal || 0), 0);
- 
+
   return {
     asOf: asOf.toISOString(),
     rules: { staleBidDays: STALE_BID_DAYS, relationshipLeads: RELATIONSHIP_LEADS },
@@ -369,8 +369,8 @@ function applyKnowifyRules(rawJobs, opts = {}) {
     },
   };
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 3 ─ INDUSTRY BANDS (calibrated from docs/CONTEXT.md §4)
 // ════════════════════════════════════════════════════════════════════════
@@ -380,44 +380,44 @@ function applyKnowifyRules(rawJobs, opts = {}) {
 // instead of generic "60% concentration = bad" guesses.
 //
 // Updating: when CONTEXT.md §4 changes, mirror the change here.
- 
+
 const BANDS = {
   // Customer concentration (top-N as % of total revenue). SBA flags >40%.
   concentration: { healthy: 30, watch: 40, risk: 60 },
- 
+
   // P&L margins
   grossMargin:  { weak: 25, healthy: 35, strong: 50 },
   netMargin:    { weak:  3, healthy:  6, strong: 12 },
- 
+
   // DSO — Days Sales Outstanding. Construction industry runs 60-90 days
   // normal. SFS at 50-80 is healthy, 80-100 means a slow GC is dragging,
   // 100+ across the book is a real issue.
   dso:          { healthy: 80, watch: 100, slow: 120 },
- 
+
   // DPO mirrored
   dpo:          { healthy: 30, watch: 60 },
- 
+
   // Working capital cycle (DSO − DPO). 20-50 days normal.
   wcCycle:      { healthy: 50, watch: 70 },
- 
+
   // Liquidity ratios
   currentRatio: { weak: 1.0, healthy: 1.5, strong: 2.0 },
   debtToEquity: { strong: 1.0, healthy: 2.0, weak: 3.0 },
- 
+
   // SBA DSCR — minimum 1.15x, lenders prefer 1.25x+
   dscr:         { sba: 1.15, lender: 1.25, strong: 1.5 },
- 
+
   // Knowify pipeline — competitive win rate. Construction sub bid-win
   // rates are generally 10-30% on truly competitive bids; higher than
   // 30% often indicates the relationship-channel filter isn't working.
   winRate:      { weak: 8, healthy: 15, strong: 25 },
 };
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 3b ─ CORE DERIVED METRICS
 // ════════════════════════════════════════════════════════════════════════
- 
+
 /**
  * Top-N customer concentration as % of total revenue.
  * Threshold guidance: <30% healthy, 30-60% watch, >60% concentration risk.
@@ -434,7 +434,7 @@ function customerConcentration(topCustomers, totalRevenue, n = 5) {
     })),
   };
 }
- 
+
 /**
  * "Days to pay" stats from the open invoices array.
  * INTERPRET AS: how long customers historically take to pay, NOT how late
@@ -470,19 +470,19 @@ function daysToPayStats(invoices) {
     buckets,
   };
 }
- 
+
 /** Effective DSO from a current AR balance and annualized revenue. */
 function calcDSO(arBalance, annualRevenue) {
   if (!arBalance || !annualRevenue) return null;
   return +(arBalance / (annualRevenue / 365)).toFixed(1);
 }
- 
+
 /** Effective DPO — Days Payable Outstanding. Mirror of DSO for the AP side. */
 function calcDPO(apBalance, annualCOGS) {
   if (!apBalance || !annualCOGS) return null;
   return +(apBalance / (annualCOGS / 365)).toFixed(1);
 }
- 
+
 /** Standard liquidity ratios from a single BS snapshot. Inventory is
  *  treated as zero for SFS (service business, no held materials). */
 function balanceRatios(bs) {
@@ -493,12 +493,12 @@ function balanceRatios(bs) {
   const workingCapital = bs.totalCurrentAssets - bs.totalCurrentLiab;
   return { currentRatio, quickRatio, debtToEquity, workingCapital };
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 4 ─ CROSS-DATA COMBINATIONS
 // ════════════════════════════════════════════════════════════════════════
- 
+
 /**
  * Working-capital cycle in days = DSO − DPO (inventory ~0 for service).
  * Lower = better. Negative = customers pay before vendors are paid (rare,
@@ -518,7 +518,7 @@ function workingCapitalCycle(D) {
     arBalance: ar, apBalance: ap,
   };
 }
- 
+
 /**
  * Cash runway in months: latest cash / average monthly burn (negative
  * operating cash flow). If operating CF is positive there's no burn —
@@ -540,7 +540,7 @@ function cashRunway(D) {
     runwayMonths: +(cash / burn).toFixed(1),
   };
 }
- 
+
 /**
  * Debt service coverage ratio: EBITDA ÷ annual debt service (interest +
  * principal). Standard SBA threshold is 1.25x. Below 1.0 means business
@@ -579,7 +579,7 @@ function dscr(D) {
     passes: pl.ebitda / debtService >= 1.25,
   };
 }
- 
+
 /**
  * Margin-erosion detector: per OpEx category, compute % of revenue in
  * the latest year vs the prior year. Flags categories that grew >25% as
@@ -595,7 +595,7 @@ function marginErosion(D) {
   const latest = all[years[years.length - 1]];
   const prior  = all[years[years.length - 2]];
   if (!latest?.opex || !prior?.opex || !latest.revenue || !prior.revenue) return null;
- 
+
   const findings = [];
   Object.entries(latest.opex).forEach(([cat, amt]) => {
     const priorAmt = prior.opex[cat] || prior.opex[cat.replace(/_/g, ' ')] || 0;
@@ -619,7 +619,7 @@ function marginErosion(D) {
   findings.sort((a, b) => b.deltaPct - a.deltaPct);
   return { yearLatest: years[years.length - 1], yearPrior: years[years.length - 2], findings };
 }
- 
+
 /**
  * Customer ledger — combines lifetime sales, current open AR, days-to-pay
  * patterns. For each customer: { name, lifetimeRevenue, currentOpen,
@@ -658,7 +658,7 @@ function customerLedger(D) {
   rows.sort((a, b) => (b.lifetimeRevenue + b.currentOpen * 2) - (a.lifetimeRevenue + a.currentOpen * 2));
   return rows;
 }
- 
+
 /**
  * Customer health score (0–100) — composite indicator combining:
  *   • Lifetime revenue (50%) — bigger customer = better
@@ -682,7 +682,7 @@ function customerHealth(ledgerRow, totalLifetimeRevenue) {
   const arScore = Math.max(0, 100 - openRatio * 1000);   // 10% open → 0 score
   return +(lifeScore * 0.5 + timeScore * 0.3 + arScore * 0.2).toFixed(0);
 }
- 
+
 /**
  * Pipeline → expected revenue projection. Multiplies pending bid value
  * by historical win rate to estimate "likely revenue we'll book" from
@@ -701,7 +701,7 @@ function pipelineProjection(D) {
     pendingBids:    r.competitive.pending,
   };
 }
- 
+
 /**
  * Cash flow conversion: NI → operating CF. Indicates "quality of earnings."
  * Healthy SaaS hits 100%+ (depreciation/amortization adds back). Service
@@ -724,7 +724,7 @@ function cashFlowConversion(D) {
     };
   });
 }
- 
+
 /**
  * Revenue YoY growth rates across all available years. Each row is
  * tagged with `isComplete` so reports can render partial-year bars
@@ -749,7 +749,7 @@ function revenueGrowth(D) {
     };
   });
 }
- 
+
 /**
  * Cost line items as % of revenue, year by year. Each year row is
  * tagged isComplete; partial years should not be banded against full-
@@ -777,8 +777,8 @@ function opexTrend(D) {
   });
   return out;
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 4b ─ OPERATIONAL METRICS (most-actionable for SFS)
 // ════════════════════════════════════════════════════════════════════════
@@ -787,7 +787,7 @@ function opexTrend(D) {
 // CONTEXT.md note, "past due" is a misnomer (TX subs have no enforceable
 // deadline), so we frame everything as days-to-pay and customer payment
 // behavior, not collections crises.
- 
+
 /**
  * Per-customer payment-behavior summary from currently-open invoices.
  * For each customer with open AR, compute their average days-out across
@@ -804,7 +804,7 @@ function opexTrend(D) {
 function customerPaymentPatterns(D) {
   const oi = D?.['qbo-open-invoices'];
   if (!oi?.invoices?.length) return null;
- 
+
   const byCustomer = {};
   for (const inv of oi.invoices) {
     const c = inv.customer || '— Unknown —';
@@ -837,7 +837,7 @@ function customerPaymentPatterns(D) {
   rows.sort((a, b) => (b.avgDaysOut || 0) - (a.avgDaysOut || 0));
   return rows;
 }
- 
+
 /**
  * Seasonal calibration — comparing each month of the current year against
  * the same month from the prior full year. Returns null if we don't have
@@ -858,15 +858,15 @@ function seasonalRevenueCompare(D) {
   const monthly = D?.['qbo-pl-monthly'];
   const monthlyByYear = D?.['qbo-sales']?.monthlyByYear;
   if (!monthly?.revenue?.months || !monthly.meta?.year || !monthlyByYear) return null;
- 
+
   const currentYear = monthly.meta.year;
   const priorYear   = String(parseInt(currentYear, 10) - 1);
   const priorRow    = monthlyByYear[priorYear];
   if (!priorRow) return null;
- 
+
   const cyRev = monthly.revenue.months;       // length = months in YTD export
   const monthHeaders = monthly.meta.monthHeaders || [];
- 
+
   let cyYTD = 0, pyYTD = 0;
   const months = cyRev.map((cy, i) => {
     const py = priorRow[i] || 0;
@@ -884,7 +884,7 @@ function seasonalRevenueCompare(D) {
   });
   return { currentYear, priorYear, months };
 }
- 
+
 /**
  * Cost productivity — for each OpEx category, how much revenue does
  * each dollar of spend produce, and is it trending up (productive) or
@@ -904,7 +904,7 @@ function costProductivity(D) {
   const cy = years[years.length - 1], py = years[years.length - 2];
   const latest = all[cy], prior = all[py];
   if (!latest?.opex || !prior?.opex || !latest.revenue || !prior.revenue) return null;
- 
+
   const findings = [];
   for (const [cat, amt] of Object.entries(latest.opex)) {
     const priorAmt = prior.opex[cat] || prior.opex[cat.replace(/_/g, ' ')] || 0;
@@ -925,7 +925,7 @@ function costProductivity(D) {
   findings.sort((a, b) => b.materiality - a.materiality);
   return { yearLatest: cy, yearPrior: py, findings };
 }
- 
+
 /**
  * Pipeline velocity — for closed (Active+Closed) jobs in Knowify, how
  * many days from creation to award. Approximates "decision time" so SFS
@@ -950,8 +950,8 @@ function pipelineVelocity(D) {
   const p75 = ages[Math.floor(ages.length * 0.75)];
   return { medianDays: median, p25, p75, sample: ages.length };
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 4c ─ GC SEGMENTATION (Group A / B / C — see CONTEXT.md §2.5)
 // ════════════════════════════════════════════════════════════════════════
@@ -975,7 +975,7 @@ function pipelineVelocity(D) {
 // window.GC_CLASSIFICATION. classifyGCByOutreach() looks up a GC name
 // against that table. Group A is computed at runtime from byGC stats,
 // not hardcoded — it stays current as bid history accumulates.
- 
+
 /**
  * Classify a GC name against the static outreach-list groups + the
  * dynamic Group A derivation (from current Knowify byGC stats).
@@ -1014,7 +1014,7 @@ function classifyGCByOutreach(gcName, byGC) {
   }
   return { name: gcName, group: 'UNCLASSIFIED', source: 'unknown', raw: gcName };
 }
- 
+
 /**
  * Pipeline by outreach group — for the *live* pending bids in Knowify,
  * how does pending value distribute across A / B / C-STOP / C-PUB /
@@ -1053,7 +1053,7 @@ function pipelineByGroup(D) {
   Object.values(out).forEach(b => b.gcs.sort((a, c) => c.totalCV - a.totalCV));
   return out;
 }
- 
+
 /**
  * Bid-volume distribution by group — purely descriptive. Tells you how
  * many bids and how much pending CV currently sit in each segmentation
@@ -1091,7 +1091,7 @@ function bidDistributionByGroup(D) {
   Object.values(out).forEach(b => b.sampleGCs.sort((a, c) => c.totalCV - a.totalCV));
   return out;
 }
- 
+
 /**
  * Group B follow-up candidates — recent (last 90 days) competitive
  * losses on Group B GCs. These are the specific lost bids Dylan would
@@ -1125,8 +1125,8 @@ function groupBRecentLosses(D, days = 90) {
   out.sort((a, b) => (a.ageDays || 9999) - (b.ageDays || 9999));
   return out;
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 4d ─ DSO / COLLECTIONS FORECAST (per-client payment behavior)
 // ════════════════════════════════════════════════════════════════════════
@@ -1145,12 +1145,12 @@ function groupBRecentLosses(D, days = 90) {
 // helpers exist to *forecast* expected collections (a planning input,
 // not a do-something insight) — they should never become "chase this
 // customer" alarms.
- 
+
 // Cache the computed DSO across multiple calls in the same render cycle.
 // Keyed by qbo-transactions meta.mergedAt so it invalidates on new upload.
 let _dsoComputedCache = null;
 let _dsoComputedKey   = null;
- 
+
 /**
  * Compute per-client DSO from the AR account in qbo-transactions.
  * FIFO matches Invoice → Payment per customer.
@@ -1171,11 +1171,11 @@ let _dsoComputedKey   = null;
 function computeDSOFromTransactions(D) {
   const txn = D?.['qbo-transactions'];
   if (!txn?.accountDetail) return null;
- 
+
   // Cache check
   const cacheKey = txn.meta?.mergedAt || txn.meta?.parsedAt || '';
   if (_dsoComputedKey === cacheKey && _dsoComputedCache) return _dsoComputedCache;
- 
+
   // Find the AR account (defensive — match the parser's isAR flag, then
   // by name pattern as fallback).
   let arInfo = null;
@@ -1185,7 +1185,7 @@ function computeDSOFromTransactions(D) {
     }
   }
   if (!arInfo?.items?.length) return null;
- 
+
   // Split into invoices (debit AR — positive amount) and payments (credit AR — negative).
   // QBO Transaction Detail by Account shows AR debits as positive (invoice
   // increases AR) and credits as negative (payment reduces AR).
@@ -1211,7 +1211,7 @@ function computeDSOFromTransactions(D) {
       byCustomer[k].payments.push({ date, amount: -it.amount, raw: it });
     }
   }
- 
+
   // FIFO match per customer. For each customer, sort invoices and payments
   // by date and walk through.
   const percentile = (sorted, p) => {
@@ -1225,7 +1225,7 @@ function computeDSOFromTransactions(D) {
     if (!c.invoices.length) continue;
     c.invoices.sort((a, b) => a.date - b.date);
     c.payments.sort((a, b) => a.date - b.date);
- 
+
     // Track each invoice's remaining unpaid balance and earliest payment date.
     const invQueue = c.invoices.map(inv => ({
       invDate: inv.date,
@@ -1246,7 +1246,7 @@ function computeDSOFromTransactions(D) {
         if (pay.amount <= 0.005) pIdx++;
       }
     }
- 
+
     // Compute DSO for fully paid invoices. Use first-payment-date as the
     // pay date — partial-pay timelines collapse to "when did money start
     // landing for this invoice."
@@ -1288,7 +1288,7 @@ function computeDSOFromTransactions(D) {
   }
   if (!clients.length) return null;
   clients.sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0));
- 
+
   // Portfolio-weighted median
   let dsoSum = 0, dsoWt = 0;
   clients.forEach(c => {
@@ -1296,11 +1296,11 @@ function computeDSOFromTransactions(D) {
   });
   const portfolioMedianDSO = dsoWt > 0 ? +(dsoSum / dsoWt).toFixed(1) : null;
   const totalInvoices = clients.reduce((s, c) => s + c.nPaid, 0);
- 
+
   // Build byNorm lookup
   const byNorm = {};
   clients.forEach(c => { byNorm[norm(c.client)] = c; });
- 
+
   const result = {
     summary: {
       clientCount: clients.length,
@@ -1324,7 +1324,7 @@ function computeDSOFromTransactions(D) {
   _dsoComputedKey = cacheKey;
   return result;
 }
- 
+
 /**
  * Look up DSO statistics for a client. Resolution order:
  *   1. Live computed from qbo-transactions (auto-recomputes when Dylan
@@ -1335,7 +1335,7 @@ function dsoForClient(D, clientName) {
   if (!clientName) return null;
   const norm = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
   const key = norm(clientName);
- 
+
   // 1. Live auto-computed from transactions
   const computed = computeDSOFromTransactions(D);
   if (computed?.byNorm?.[key]) {
@@ -1347,7 +1347,7 @@ function dsoForClient(D, clientName) {
   }
   return null;
 }
- 
+
 /**
  * Portfolio-wide DSO summary — fallback when a customer has no history.
  * Resolution order matches dsoForClient.
@@ -1362,7 +1362,7 @@ function dsoPortfolioSummary(D) {
   }
   return null;
 }
- 
+
 /**
  * Estimate when an open invoice is likely to be paid. Returns:
  *   {
@@ -1390,11 +1390,11 @@ function estimatePaymentDate(invoice, D) {
   if (isNaN(inv)) return null;
   const daysOpen = Math.max(0, Math.floor((today - inv) / 86400000));
   const customer = invoice.customer || invoice.client || invoice.name;
- 
+
   let expected = null, p75 = null, p90 = null;
   let confidence = 'unknown';
   let nPaid = 0;
- 
+
   const stats = dsoForClient(D, customer);
   if (stats && stats.medianDSO != null && stats.nPaid >= MIN_SAMPLE) {
     expected = stats.medianDSO;
@@ -1421,9 +1421,9 @@ function estimatePaymentDate(invoice, D) {
       confidence = 'portfolio-fallback';
     }
   }
- 
+
   if (expected == null) return null;
- 
+
   const addDays = (date, days) => {
     const d = new Date(date.getTime() + days * 86400000);
     return d.toISOString().slice(0, 10);
@@ -1446,7 +1446,7 @@ function estimatePaymentDate(invoice, D) {
     isLate: remainingDays < 0,
   };
 }
- 
+
 /**
  * Forecast collections from the *currently-open* invoice book over the
  * next N days. For each open invoice we estimate the expected pay date
@@ -1467,7 +1467,7 @@ function forecastCollections(D) {
   const oi = D?.['qbo-open-invoices'];
   const invoices = oi?.invoices || [];
   if (!invoices.length) return null;
- 
+
   const buckets = [
     { label: '0–30 days',   days: [0, 30],   amount: 0, count: 0, items: [] },
     { label: '31–60 days',  days: [31, 60],  amount: 0, count: 0, items: [] },
@@ -1479,7 +1479,7 @@ function forecastCollections(D) {
   const confDollar = { 'client-history': 0, 'low-sample': 0, 'portfolio-fallback': 0, unknown: 0 };
   let totalOpen = 0;
   const all = [];
- 
+
   for (const inv of invoices) {
     const est = estimatePaymentDate(inv, D);
     const amount = inv.openBalance || 0;
@@ -1501,12 +1501,12 @@ function forecastCollections(D) {
     buckets[i].items.push({ inv, est });
     all.push({ inv, est, sortKey: est.remainingDays });
   }
- 
+
   buckets.forEach(b => { b.amount = +b.amount.toFixed(2); });
- 
+
   // Sort by soonest expected payment
   all.sort((a, b) => a.sortKey - b.sortKey);
- 
+
   return {
     asOf: oi?.meta?.parsedAt || new Date().toISOString(),
     totalOpen: +totalOpen.toFixed(2),
@@ -1521,8 +1521,8 @@ function forecastCollections(D) {
     },
   };
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 5 ─ AUTO-INSIGHTS
 // ════════════════════════════════════════════════════════════════════════
@@ -1531,7 +1531,7 @@ function forecastCollections(D) {
 // based on whatever data is currently in Firebase. Used by the Insights
 // report page. Each insight has:
 //   { id, category, severity, title, message, value, recommendation }
- 
+
 // IMPORTANT FOR FUTURE CHATS:
 // SFS controls *internal levers*: pricing/margin, OpEx, crew/capacity,
 // service mix, hiring. They do NOT control: when GCs pay, which GCs win
@@ -1545,7 +1545,7 @@ function forecastCollections(D) {
 // do"). Customer/GC data belongs in descriptive views, not insights.
 function generateInsights(D) {
   const out = [];
- 
+
   // ── 1. Net margin (pricing/cost discipline — internal lever) ─────
   // Banded against industry medians — ONLY fire on complete-year data.
   // Comparing partial-year (YTD) net margin to a full-year industry
@@ -1574,7 +1574,7 @@ function generateInsights(D) {
       });
     }
   }
- 
+
   // ── 1b. YTD pace (informational — same-period YoY only) ──────────
   // This is the right way to comment on the partial-year slice. Compare
   // CY-YTD to PY same months, NOT to PY full year. No band-vs-industry
@@ -1590,7 +1590,7 @@ function generateInsights(D) {
       recommendation: ytd.yoyRevenuePct < -20 ? 'Don\'t over-react — Q1 is normally the weakest quarter. Re-check after May/June numbers. Same-period comparison is the right frame, not YTD vs PY full-year.' : '',
     });
   }
- 
+
   // ── 2. Gross margin trajectory (pricing power signal) ────────────
   // Multi-year GM trend tells whether SFS is holding pricing or eroding.
   // Use ONLY complete years — a partial-year GM% is distorted by seasonal
@@ -1619,7 +1619,7 @@ function generateInsights(D) {
       }
     }
   }
- 
+
   // ── 3. OpEx categories creeping vs producing revenue ─────────────
   // The "is this cost producing matching revenue?" lens — a controllable.
   const cp = costProductivity(D);
@@ -1646,7 +1646,7 @@ function generateInsights(D) {
       });
     }
   }
- 
+
   // ── 4. Crew productivity / labor leverage ────────────────────────
   // Revenue ÷ (Wages COGS + Salaries OpEx) tells you how much top-line
   // each labor dollar is producing. Going up = more efficient delivery.
@@ -1685,11 +1685,11 @@ function generateInsights(D) {
       }
     }
   }
- 
+
   // (Insight 5 was an older seasonal-pace based on sales-by-customer
   // monthly data; the new YTD-pace insight at §1b above replaces it
   // using the higher-precision monthly P&L feed. Don't double-report.)
- 
+
   // ── 6. Pipeline forecast (forward visibility — operational) ──────
   const proj = pipelineProjection(D);
   if (proj) {
@@ -1701,7 +1701,7 @@ function generateInsights(D) {
       recommendation: 'Use as a planning floor for crew/equipment commitments over the next ~60-90 days.',
     });
   }
- 
+
   // ── 7. Pipeline velocity (planning input) ────────────────────────
   const vel = pipelineVelocity(D);
   if (vel?.medianDays != null) {
@@ -1713,7 +1713,7 @@ function generateInsights(D) {
       recommendation: 'For capacity planning: a bid submitted today typically books as work ~' + vel.medianDays + ' days out.',
     });
   }
- 
+
   // ── 8. Knowify data quality flag (informational) ─────────────────
   const k = D['knowify-jobs'];
   if (k?.jobs) {
@@ -1729,15 +1729,15 @@ function generateInsights(D) {
       });
     }
   }
- 
+
   return out;
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 6 ─ HELPERS
 // ════════════════════════════════════════════════════════════════════════
- 
+
 // ─────────────────────────────────────────────────────────────────────────
 // PARTIAL-YEAR HELPERS (CONTEXT.md §2.4 — TX striping is heavily seasonal,
 // so any YTD-vs-full-year comparison or industry-band check on partial-year
@@ -1745,7 +1745,7 @@ function generateInsights(D) {
 // the current YTD slice and only band complete years against industry
 // medians.)
 // ─────────────────────────────────────────────────────────────────────────
- 
+
 /**
  * Detect whether a year is complete based on the monthly P&L feed.
  * If qbo-pl-monthly's meta.year matches and only N of 12 months have
@@ -1782,7 +1782,7 @@ function _yearStatus(D, yearKey) {
     year: yearKey,
   };
 }
- 
+
 /**
  * Returns the sorted year keys for which the year is complete (≥ 12
  * months covered). The current calendar year is excluded if it shows
@@ -1795,7 +1795,7 @@ function completeYears(D) {
   const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
   return years.filter(y => _yearStatus(D, y).complete);
 }
- 
+
 /**
  * Returns whichever year keys exist in qbo-pl_all, paired with their
  * status. Lets reports differentiate complete bars from partial ones
@@ -1806,7 +1806,7 @@ function yearStatusList(D) {
   const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
   return years.map(y => Object.assign({}, _yearStatus(D, y), { year: y }));
 }
- 
+
 /**
  * Helper used by several metrics — get the latest *complete* annual P&L
  * (never YTD). If the current year's qbo-pl-monthly shows < 12 months
@@ -1826,7 +1826,7 @@ function _latestAnnualPL(D) {
   Object.defineProperty(out, '_year', { value: yr, enumerable: false });
   return out;
 }
- 
+
 /**
  * YTD-versus-prior-year-same-period — the right way to compare partial-
  * year data. Sums the current YTD revenue/cogs/opex from qbo-pl-monthly
@@ -1853,21 +1853,21 @@ function ytdVsPriorSamePeriod(D) {
   const monthly = D?.['qbo-pl-monthly'];
   const monthlyByYear = D?.['qbo-sales']?.monthlyByYear;
   if (!monthly?.meta?.year || !monthly?.revenue?.months) return null;
- 
+
   const year = String(monthly.meta.year);
   const status = _yearStatus(D, year);
   if (!status.monthsCovered) return null;
- 
+
   const N = status.monthsCovered;
   const monthsCY = monthly.revenue.months.slice(0, N);
   const cogsCY   = (monthly.cogs?.months || []).slice(0, N);
   const opexCY   = (monthly.opex?.months || []).slice(0, N);
   const sum = arr => arr.reduce((s, v) => s + (v || 0), 0);
- 
+
   const cyRev  = sum(monthsCY);
   const cyCogs = sum(cogsCY);
   const cyOpex = sum(opexCY);
- 
+
   const cy = {
     revenue: cyRev,
     cogs:    cyCogs,
@@ -1875,7 +1875,7 @@ function ytdVsPriorSamePeriod(D) {
     grossMarginPct: cyRev ? +((cyRev - cyCogs) / cyRev * 100).toFixed(2) : null,
     netMarginPct:   cyRev ? +((cyRev - cyCogs - cyOpex) / cyRev * 100).toFixed(2) : null,
   };
- 
+
   // Build PY-same-period from monthlyByYear (revenue only — that's what
   // qbo-sales gives us). PY cost data at month-grain isn't available, so
   // grossMarginPct/netMarginPct on the PY side are intentionally null.
@@ -1887,7 +1887,7 @@ function ytdVsPriorSamePeriod(D) {
     py = { revenue: pyRev, grossMarginPct: null, netMarginPct: null };
     yoyRevenuePct = pyRev ? +(((cyRev - pyRev) / pyRev) * 100).toFixed(1) : null;
   }
- 
+
   return {
     year,
     monthsCovered: N,
@@ -1895,12 +1895,12 @@ function ytdVsPriorSamePeriod(D) {
     cy, py, yoyRevenuePct,
   };
 }
- 
- 
+
+
 // ════════════════════════════════════════════════════════════════════════
 // SECTION 7 ─ CHART.JS THEME
 // ════════════════════════════════════════════════════════════════════════
- 
+
 function setupChartTheme() {
   if (typeof Chart === 'undefined') return;
   Chart.defaults.color = '#8a90a0';
@@ -1923,7 +1923,7 @@ function setupChartTheme() {
     }
   }
 }
- 
+
 const CHART_COLORS = {
   yellow:'#f5c842', orange:'#e07b2b', red:'#e05252', green:'#3ecf8e',
   blue:'#4a9eff', purple:'#9b6dff', muted:'#555c70', bright:'#e8eaf0',

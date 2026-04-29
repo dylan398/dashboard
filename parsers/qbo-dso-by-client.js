@@ -29,7 +29,7 @@
 // and the 30/60/90/120-day collection forecast on the Customers page.
 // See estimatePaymentDate() and forecastCollections() in core/dash.js.
 // ─────────────────────────────────────────────────────────────────────────
- 
+
 const PARSER_DSO_BY_CLIENT = {
   id: 'qbo-dso-by-client',
   label: 'Days to Pay by Company',
@@ -38,13 +38,13 @@ const PARSER_DSO_BY_CLIENT = {
   hint: 'XLSX file with Client + DSO statistics columns. Header row 4 (rows 1-3 are title, blurb, blank).',
   storageStrategy: 'period',
   expectedReportType: null, // XLSX — no header sniff
- 
+
   getPeriodKey(data) {
     // Keyed by parse date — newer upload overwrites older. We do NOT key
     // by anything in the data because the upload is meant to refresh.
     return new Date().toISOString().slice(0, 10);
   },
- 
+
   async parse(file) {
     if (typeof XLSX === 'undefined') throw new Error('SheetJS (XLSX) not loaded.');
     const buf = await file.arrayBuffer();
@@ -52,7 +52,7 @@ const PARSER_DSO_BY_CLIENT = {
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('No sheet found in workbook.');
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
- 
+
     // Find the header row — typically row 3 (zero-indexed) but locate it
     // robustly so a slightly different export still parses.
     let headerIdx = -1;
@@ -66,7 +66,7 @@ const PARSER_DSO_BY_CLIENT = {
       }
     }
     if (headerIdx < 0) throw new Error('Could not find header row (looking for "Client" + "Mean DSO" columns).');
- 
+
     const header = rows[headerIdx].map(c => (c || '').toString().trim());
     const colIdx = (re) => header.findIndex(h => re.test(h));
     const idxClient   = 0;
@@ -82,17 +82,17 @@ const PARSER_DSO_BY_CLIENT = {
     const idxPctOver  = colIdx(/%\s*paid\s*>\s*120/i);
     const idxStd      = colIdx(/std\s*dev/i);
     const idxTotal    = colIdx(/total\s*paid/i);
- 
+
     if (idxNPaid < 0 || idxMean < 0 || idxMedian < 0) {
       throw new Error('Required columns missing. Expected at least: Client, # Paid, Mean DSO, Median DSO.');
     }
- 
+
     const num = (v) => {
       if (v == null || v === '') return null;
       const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[$,\s]/g, ''));
       return (isFinite(n) ? n : null);
     };
- 
+
     const clients = [];
     for (let i = headerIdx + 1; i < rows.length; i++) {
       const r = rows[i];
@@ -117,7 +117,7 @@ const PARSER_DSO_BY_CLIENT = {
         totalPaid:    num(r[idxTotal]),
       });
     }
- 
+
     // Portfolio-wide stats (used as fallback when a client has no history)
     const totalInvoices = clients.reduce((s, c) => s + (c.nPaid || 0), 0);
     const totalPaid     = clients.reduce((s, c) => s + (c.totalPaid || 0), 0);
@@ -127,10 +127,10 @@ const PARSER_DSO_BY_CLIENT = {
       if (c.medianDSO != null && c.nPaid) { dsoSum += c.medianDSO * c.nPaid; dsoWt += c.nPaid; }
     });
     const portfolioMedianDSO = dsoWt > 0 ? +(dsoSum / dsoWt).toFixed(1) : null;
- 
+
     // Sort by total paid (descending) — biggest customers first
     clients.sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0));
- 
+
     return {
       meta: {
         reportType: 'Days to Pay by Company',
@@ -151,7 +151,7 @@ const PARSER_DSO_BY_CLIENT = {
       clients,
     };
   },
- 
+
   validate(data) {
     const errors = [], warnings = [];
     if (!data?.clients?.length) {
@@ -163,7 +163,7 @@ const PARSER_DSO_BY_CLIENT = {
     if (data.summary.portfolioMedianDSO == null) warnings.push('Could not compute portfolio median DSO — check Median DSO column.');
     return { errors, warnings };
   },
- 
+
   renderPreview(data) {
     const s = data.summary || {};
     const rows = (data.clients || []).slice(0, 15);

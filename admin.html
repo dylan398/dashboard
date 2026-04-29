@@ -34,8 +34,8 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
- 
- 
+
+
 .header{background:var(--bg-panel);border-bottom:2px solid var(--yellow);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100}
 .header-left{display:flex;align-items:center;gap:16px}
 .logo-mark{width:38px;height:38px;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:18px;color:#000}
@@ -46,7 +46,7 @@ a{color:inherit;text-decoration:none}
 .nav-link:hover{color:var(--txt-primary)}
 .db-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-muted)}
 .status-dot{width:8px;height:8px;border-radius:50%;background:var(--txt-muted)}
- 
+
 /* LOGIN */
 #login-screen{display:flex;align-items:center;justify-content:center;min-height:80vh}
 .login-box{background:var(--bg-card);border:1px solid var(--border);padding:40px;width:360px;text-align:center}
@@ -54,7 +54,7 @@ a{color:inherit;text-decoration:none}
 .login-box p{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
 .login-box input{width:100%;background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:10px 14px;font-size:14px;margin-bottom:12px;font-family:var(--font-body)}
 .login-box input:focus{outline:none;border-color:var(--yellow)}
- 
+
 /* BUTTONS */
 .btn{background:var(--yellow);color:#000;border:none;padding:10px 24px;font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:opacity .2s;width:100%}
 .btn:hover{opacity:.85}
@@ -64,7 +64,7 @@ a{color:inherit;text-decoration:none}
 .btn-green{background:var(--green);color:#000}
 .btn-red{background:transparent;border:1px solid var(--red);color:var(--red)}
 .btn-red:hover{background:var(--red);color:#000}
- 
+
 /* MAIN */
 #app-screen{display:none}
 .main{padding:28px;max-width:1400px;margin:0 auto}
@@ -72,14 +72,14 @@ a{color:inherit;text-decoration:none}
 .page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:28px}
 .section-header{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .section-header .accent{color:var(--yellow);margin-right:8px}
- 
+
 /* STATUS GRID ─────────────────────────────────────────── */
 .status-section{background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px}
 .status-section-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .status-section-title{font-family:var(--font-display);font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary)}
 .status-counts{display:flex;gap:12px;font-family:var(--font-mono);font-size:11px}
 .sc-green{color:var(--green)}.sc-yellow{color:var(--yellow)}.sc-red{color:var(--red)}
- 
+
 .status-table{width:100%;border-collapse:collapse}
 .status-table th{text-align:left;padding:7px 18px;font-family:var(--font-display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);border-bottom:1px solid var(--border-bright)}
 .status-table td{padding:8px 18px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12px}
@@ -87,21 +87,21 @@ a{color:inherit;text-decoration:none}
 .status-table tr:hover{background:var(--bg-hover)}
 .status-table tr.missing-row{background:rgba(224,82,82,.04)}
 .status-table tr.stale-row{background:rgba(224,123,43,.04)}
- 
+
 .need-label{font-weight:500;color:var(--txt-primary);font-size:13px}
 .need-sub{color:var(--txt-muted);font-size:11px;margin-top:2px}
 .need-export{color:var(--txt-muted);font-size:11px;margin-top:3px;font-family:var(--font-mono)}
- 
+
 /* STATUS PILLS */
 .pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;padding:3px 8px;border:1px solid;border-radius:2px;white-space:nowrap}
 .pill-green{border-color:var(--green);color:var(--green);background:rgba(62,207,142,.08)}
 .pill-yellow{border-color:var(--yellow);color:var(--yellow);background:rgba(245,200,66,.08)}
 .pill-red{border-color:var(--red);color:var(--red);background:rgba(224,82,82,.08)}
 .pill-muted{border-color:var(--border-bright);color:var(--txt-muted)}
- 
+
 /* STALE INDICATOR */
 .stale-badge{font-family:var(--font-mono);font-size:10px;color:var(--orange);border:1px solid var(--orange);padding:2px 6px;margin-left:6px}
- 
+
 /* UPLOAD PANEL ────────────────────────────────────────── */
 .upload-section{background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px}
 .upload-section-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
@@ -109,7 +109,7 @@ a{color:inherit;text-decoration:none}
 .upload-toggle{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted)}
 .upload-body{padding:18px;display:none}
 .upload-body.open{display:block}
- 
+
 .parsers-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .parser-card{background:var(--bg-hover);border:1px solid var(--border);padding:0;transition:border-color .2s}
 .parser-card.has-data{border-color:var(--green)}
@@ -130,7 +130,7 @@ a{color:inherit;text-decoration:none}
 .pc-status{font-size:11px;margin-top:8px;min-height:14px;line-height:1.4}
 .pc-status.ok{color:var(--green)}.pc-status.err{color:var(--red)}.pc-status.loading{color:var(--yellow)}.pc-status.warn{color:var(--orange)}.pc-status.pushed{color:var(--blue)}
 .pc-status strong{color:var(--txt-primary)}
- 
+
 /* PREVIEW ────────────────────────────────────────────── */
 .preview-wrap{background:var(--bg-card);border:1px solid var(--border);margin-top:14px}
 .preview-tabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
@@ -138,7 +138,7 @@ a{color:inherit;text-decoration:none}
 .preview-tab.active{color:var(--yellow);border-bottom-color:var(--yellow)}
 .preview-tab.has-data{color:var(--txt-secondary)}
 .preview-content{padding:18px;min-height:180px}
- 
+
 .preview-meta{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted);margin-bottom:12px;padding:5px 10px;background:var(--bg-hover);border-left:2px solid var(--border-bright)}
 .preview-meta strong{color:var(--yellow)}
 .preview-warnings{margin-bottom:12px;padding:10px 12px;background:rgba(224,123,43,.06);border-left:2px solid var(--orange);font-size:12px;color:var(--orange)}
@@ -162,21 +162,21 @@ a{color:inherit;text-decoration:none}
 .pkpi-label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-muted);margin-bottom:3px}
 .pkpi-val{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--txt-primary)}
 .pkpi-val.green{color:var(--green)}.pkpi-val.yellow{color:var(--yellow)}.pkpi-val.red{color:var(--red)}.pkpi-val.orange{color:var(--orange)}
- 
+
 /* COMMIT ────────────────────────────────────────────── */
 .commit-panel{background:var(--bg-card);border:1px solid var(--border);border-top:2px solid var(--green);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:20px;position:sticky;bottom:0;z-index:50}
 .commit-info{font-size:13px;color:var(--txt-secondary)}
 .commit-info strong{color:var(--txt-primary)}
 .commit-status{font-family:var(--font-mono);font-size:12px;color:var(--txt-muted);margin-top:4px;min-height:16px}
 .empty-state{text-align:center;padding:30px;color:var(--txt-muted);font-size:13px}
- 
+
 /* EXPORT HELPER ─────────────────────────────────────── */
 .export-steps{background:var(--bg-base);border:1px solid var(--border);padding:10px 14px;margin-top:6px;font-size:11px;color:var(--txt-muted);line-height:1.8;display:none}
 .export-steps.open{display:block}
 .export-steps code{font-family:var(--font-mono);color:var(--yellow);font-size:10px}
 .exp-toggle{background:none;border:none;color:var(--blue);font-size:11px;cursor:pointer;padding:0;font-family:var(--font-body)}
 .exp-toggle:hover{color:var(--txt-primary)}
- 
+
 .loading-spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border-bright);border-top-color:var(--yellow);border-radius:50%;animation:spin .8s linear infinite;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -187,8 +187,8 @@ a{color:inherit;text-decoration:none}
   injectNavStyles();
   renderNav('admin');
 </script>
- 
- 
+
+
 <div id="login-screen">
   <div class="login-box">
     <div class="logo-mark" style="margin:0 auto 16px">SF</div>
@@ -199,20 +199,20 @@ a{color:inherit;text-decoration:none}
     <div id="login-err" style="color:var(--red);font-size:12px;margin-top:10px"></div>
   </div>
 </div>
- 
+
 <div id="app-screen">
   
- 
+
   <main class="main">
     <div class="page-title">Data Management</div>
     <div class="page-sub">All data requirements from Jan 1, 2020 to present. Upload files below to fill gaps. <a href="#" onclick="doLogout();return false" style="color:var(--txt-muted);margin-left:6px;font-size:11px;text-decoration:underline">log out</a></div>
- 
+
     <!-- STATUS PANEL -->
     <div id="status-loading" style="padding:30px;text-align:center;color:var(--txt-muted);font-size:13px">
       <span class="loading-spinner"></span>Reading Firebase…
     </div>
     <div id="status-panel" style="display:none"></div>
- 
+
     <!-- UPLOAD SECTION (collapsible) -->
     <div class="upload-section" id="upload-section">
       <div class="upload-section-head" onclick="toggleUpload()">
@@ -234,7 +234,7 @@ a{color:inherit;text-decoration:none}
         </div>
       </div>
     </div>
- 
+
     <!-- COMMIT -->
     <div class="commit-panel">
       <div>
@@ -249,7 +249,7 @@ a{color:inherit;text-decoration:none}
     </div>
   </main>
 </div>
- 
+
 <script>
 const APP_PASS = 'Semperfi3004!';
 const SESSION_KEY = 'sfs-admin-auth';
@@ -259,23 +259,23 @@ const parsedWarnings = {};  // { id: ['warning text', ...] }
 const pushResults = {};     // { id: { ok: bool, key?: string, error?: string } }
 let activeTab = null;
 let firebaseManifest = {};
- 
+
 // Friendly parser name (drops the "QuickBooks — " prefix)
 function parserShortLabel(p) { return p.label.split('—')[1]?.trim() || p.label; }
- 
+
 // ── DATA REQUIREMENTS ─────────────────────────────────────────
 // Everything starts Jan 1, 2020
 const START_YEAR = 2020;
 const CURRENT_YEAR = new Date().getFullYear();
 const TODAY = new Date().toISOString().slice(0,10);
- 
+
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
- 
+
 function monthName(mo) { return MONTHS_SHORT[parseInt(mo)-1] || mo; }
- 
+
 function buildRequirements() {
   const reqs = [];
- 
+
   // ── P&L: full year per year, plus YTD current year
   for (let yr = START_YEAR; yr < CURRENT_YEAR; yr++) {
     reqs.push({
@@ -303,8 +303,8 @@ function buildRequirements() {
       `Export → Download as CSV`
     ]
   });
- 
- 
+
+
   // ── Monthly P&L for current year (single requirement, period strategy)
   reqs.push({
     id: `pl-monthly-${CURRENT_YEAR}`, dataset: 'qbo-pl-monthly', group: 'P&L by Month',
@@ -319,7 +319,7 @@ function buildRequirements() {
       `Export → Download as CSV`
     ]
   });
- 
+
   // ── A/R Aging Summary (snapshot, refresh monthly)
   reqs.push({
     id: `ar-aging-current`, dataset: 'qbo-ar-aging', group: 'A/R Aging',
@@ -333,7 +333,7 @@ function buildRequirements() {
       `<strong>Export → Download as CSV</strong> (not PDF)`
     ]
   });
- 
+
   // ── A/P Aging Summary (snapshot, refresh monthly)
   reqs.push({
     id: `ap-aging-current`, dataset: 'qbo-ap-aging', group: 'A/P Aging',
@@ -347,7 +347,7 @@ function buildRequirements() {
       `<strong>Export → Download as CSV</strong> (not PDF)`
     ]
   });
- 
+
   // ── Open Invoices (snapshot, refresh weekly)
   reqs.push({
     id: `open-invoices-current`, dataset: 'qbo-open-invoices', group: 'Open Invoices',
@@ -360,7 +360,7 @@ function buildRequirements() {
       `Export → Download as Excel (.xlsx)`
     ]
   });
- 
+
   // ── Cash Flow: full year per year, plus YTD current year
   for (let yr = START_YEAR; yr < CURRENT_YEAR; yr++) {
     reqs.push({
@@ -386,7 +386,7 @@ function buildRequirements() {
       `Export → Download as CSV`
     ]
   });
- 
+
   // ── Balance Sheet: Jan 1 snapshot for each year, plus current.
   // Skip BS Jan 1, 2020 — QuickBooks account didn't exist that day.
   for (let yr = START_YEAR + 1; yr <= CURRENT_YEAR; yr++) {
@@ -416,7 +416,7 @@ function buildRequirements() {
       `Export → Download as CSV`
     ]
   });
- 
+
   // ── Sales: everything
   reqs.push({
     id: `sales-all`, dataset: 'qbo-sales', group: 'Sales by Customer',
@@ -430,7 +430,7 @@ function buildRequirements() {
       `Note: you can upload a shorter recent range — data merges with existing`
     ]
   });
- 
+
   // ── Transactions: everything
   reqs.push({
     id: `txn-all`, dataset: 'qbo-transactions', group: 'Transaction Detail',
@@ -444,7 +444,7 @@ function buildRequirements() {
       `Note: you can upload a shorter recent range — data merges with existing`
     ]
   });
- 
+
   // ── Knowify: current export
   reqs.push({
     id: `knowify-current`, dataset: 'knowify-jobs', group: 'Knowify',
@@ -458,23 +458,23 @@ function buildRequirements() {
       `All four tabs (Active, Rejected, Bidding, Closed) must be in the same file`
     ]
   });
- 
+
   return reqs;
 }
- 
+
 // ── CHECK REQUIREMENTS AGAINST FIREBASE ─────────────────────────
 // checkRequirements now reads from the lightweight MANIFEST, not full Firebase data
 function checkRequirements(reqs, manifest) {
   const now = new Date();
   const thirtyDaysAgo = new Date(now - 30*24*60*60*1000).toISOString().slice(0,10);
- 
+
   return reqs.map(req => {
     let status = 'missing';
     let detail = '';
     let savedAt = null;
- 
+
     const ds = manifest[req.dataset] || {};
- 
+
     if (req.type === 'period') {
       const periods = ds.periods || {};
       const entry = periods[req.key]; // { savedAt, period }
@@ -535,11 +535,11 @@ function checkRequirements(reqs, manifest) {
         }
       }
     }
- 
+
     return { ...req, status, detail, savedAt };
   });
 }
- 
+
 // ── BUILD STATUS UI ──────────────────────────────────────────
 function buildStatusPanel(checkedReqs) {
   const groups = {};
@@ -547,11 +547,11 @@ function buildStatusPanel(checkedReqs) {
     if (!groups[r.group]) groups[r.group] = [];
     groups[r.group].push(r);
   });
- 
+
   const totalOk     = checkedReqs.filter(r => r.status==='ok').length;
   const totalStale  = checkedReqs.filter(r => r.status==='stale').length;
   const totalMissing= checkedReqs.filter(r => r.status==='missing').length;
- 
+
   // Summary bar
   let html = `
     <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
@@ -571,12 +571,12 @@ function buildStatusPanel(checkedReqs) {
         Data range: Jan 1, ${START_YEAR} → present &nbsp;·&nbsp; <span style="color:var(--green)">●</span> Present &nbsp;<span style="color:var(--orange)">●</span> Stale (&gt;30 days) &nbsp;<span style="color:var(--red)">●</span> Missing
       </div>
     </div>`;
- 
+
   Object.entries(groups).forEach(([groupName, items]) => {
     const ok      = items.filter(r=>r.status==='ok').length;
     const stale   = items.filter(r=>r.status==='stale').length;
     const missing = items.filter(r=>r.status==='missing').length;
- 
+
     html += `
     <div class="status-section">
       <div class="status-section-head">
@@ -600,22 +600,22 @@ function buildStatusPanel(checkedReqs) {
       </table>
     </div>`;
   });
- 
+
   return html;
 }
- 
+
 function buildStatusRow(r) {
   const rowCls = r.status === 'missing' ? 'missing-row' : r.status === 'stale' ? 'stale-row' : '';
- 
+
   const pill = r.status === 'ok'
     ? `<span class="pill pill-green">✓ Current</span>`
     : r.status === 'stale'
     ? `<span class="pill pill-yellow">⚠ Stale</span>`
     : `<span class="pill pill-red">✗ Missing</span>`;
- 
+
   const steps = r.exportSteps.map(s => `→ ${s}`).join('<br>');
   const expId = `exp-${r.id}`;
- 
+
   return `<tr class="${rowCls}">
     <td>
       <div class="need-label">${r.label}</div>
@@ -633,14 +633,14 @@ function buildStatusRow(r) {
     </td>
   </tr>`;
 }
- 
+
 function toggleExport(id) {
   const el = document.getElementById(id);
   const btn = el.previousElementSibling;
   const open = el.classList.toggle('open');
   btn.textContent = open ? '▾ Steps' : '▸ Steps';
 }
- 
+
 // ── UPLOAD SECTION ───────────────────────────────────────────
 let uploadOpen = false;
 function toggleUpload() {
@@ -648,7 +648,7 @@ function toggleUpload() {
   document.getElementById('upload-body').classList.toggle('open', uploadOpen);
   document.getElementById('upload-toggle').textContent = uploadOpen ? '▲ Hide' : '▼ Show';
 }
- 
+
 function buildGrid() {
   const grid = document.getElementById('parsers-grid');
   grid.innerHTML = PARSERS.map(p => {
@@ -673,37 +673,37 @@ function buildGrid() {
       </div>
     </div>`}).join('');
 }
- 
+
 function buildTabs() {
   document.getElementById('preview-tabs').innerHTML = PARSERS.map(p =>
     `<div class="preview-tab" id="tab-${p.id}" onclick="showTab('${p.id}')">${p.label.split('—')[1]?.trim()||p.label}</div>`
   ).join('');
 }
- 
+
 function dzOver(e,id){e.preventDefault();document.getElementById('drop-'+id).classList.add('drag-over')}
 function dzLeave(id){document.getElementById('drop-'+id).classList.remove('drag-over')}
 function dzDrop(e,id){e.preventDefault();dzLeave(id);const f=e.dataTransfer.files[0];if(f)processFile(f,id)}
 function handleFile(input,id){if(input.files[0])processFile(input.files[0],id)}
- 
+
 async function processFile(file, id) {
   const parser = PARSERS.find(p => p.id === id);
   const card = document.getElementById('card-'+id);
   const status = document.getElementById('status-'+id);
   const drop = document.getElementById('drop-'+id);
- 
+
   // Reset prior state for this slot
   delete parsedData[id];
   delete parsedWarnings[id];
   delete pushResults[id];
- 
+
   card.className = 'parser-card loading';
   status.className = 'pc-status loading';
   status.textContent = 'Parsing…';
   drop.classList.add('has-file');
- 
+
   try {
     const data = await parser.parse(file);
- 
+
     // ── Wrong-zone detection (CSV parsers only — XLSX has no header to sniff)
     if (parser.expectedReportType && data.meta?.reportType) {
       const rt = data.meta.reportType;
@@ -720,7 +720,7 @@ async function processFile(file, id) {
         return;
       }
     }
- 
+
     // ── Sanity validation
     const result = parser.validate ? parser.validate(data) : { errors: [], warnings: [] };
     if (result.errors && result.errors.length) {
@@ -731,11 +731,11 @@ async function processFile(file, id) {
       updateCommitCount();
       return;
     }
- 
+
     // ── Stage the data
     parsedData[id] = data;
     parsedWarnings[id] = result.warnings || [];
- 
+
     const key = parser.getPeriodKey(data);
     if (parsedWarnings[id].length) {
       card.className = 'parser-card warn';
@@ -758,7 +758,7 @@ async function processFile(file, id) {
     updateCommitCount();
   }
 }
- 
+
 function showTab(id) {
   activeTab = id;
   document.querySelectorAll('.preview-tab').forEach(t=>t.classList.remove('active'));
@@ -780,12 +780,12 @@ function showTab(id) {
     : '';
   content.innerHTML = warningHTML + parser.renderPreview(data);
 }
- 
+
 function updateCommitCount() {
   const n = Object.keys(parsedData).length;
   document.getElementById('commit-count').textContent = n + ' dataset' + (n!==1?'s':'');
 }
- 
+
 function clearAll() {
   Object.keys(parsedData).forEach(k=>delete parsedData[k]);
   Object.keys(parsedWarnings).forEach(k=>delete parsedWarnings[k]);
@@ -798,7 +798,7 @@ function clearAll() {
   document.getElementById('commit-status').textContent='';
   updateCommitCount();
 }
- 
+
 // ── FIREBASE PUSH ────────────────────────────────────────────
 // Pushes each staged dataset independently. A failure on one doesn't
 // abort the others — we collect per-dataset results, then render them.
@@ -810,11 +810,11 @@ async function pushToFirebase(retryOnly = false) {
     alert(retryOnly ? 'Nothing to retry.' : 'No data to push. Parse at least one file first.');
     return;
   }
- 
+
   const status = document.getElementById('commit-status');
   status.style.color = 'var(--yellow)';
   status.innerHTML = `<span class="loading-spinner"></span>Pushing ${ids.length} dataset${ids.length>1?'s':''}…`;
- 
+
   for (const id of ids) {
     const parser = PARSERS.find(p => p.id === id);
     const data = parsedData[id];
@@ -822,12 +822,12 @@ async function pushToFirebase(retryOnly = false) {
     const key = parser.getPeriodKey(data);
     const card = document.getElementById('card-'+id);
     const statusEl = document.getElementById('status-'+id);
- 
+
     if (statusEl) {
       statusEl.className = 'pc-status loading';
       statusEl.innerHTML = `<span class="loading-spinner"></span>Pushing ${strategy}:${key}…`;
     }
- 
+
     try {
       if (strategy === 'period') {
         await DB.writePeriod(id, key, data);
@@ -855,21 +855,21 @@ async function pushToFirebase(retryOnly = false) {
       console.error('Push failed for', id, err);
     }
   }
- 
+
   // Best-effort meta write (non-fatal)
   try { await DB.writeMeta(Object.keys(parsedData)); } catch(e) { console.warn('meta write failed', e); }
- 
+
   renderPushResults();
   setTimeout(() => refreshStatusPanel(), 1200);
 }
- 
+
 function renderPushResults() {
   const status = document.getElementById('commit-status');
   const allResults = Object.entries(pushResults);
   const ok    = allResults.filter(([,r]) => r.ok).length;
   const fail  = allResults.filter(([,r]) => !r.ok).length;
   const failed = allResults.filter(([,r]) => !r.ok);
- 
+
   if (fail === 0) {
     status.style.color = 'var(--green)';
     status.innerHTML = `✓ Pushed ${ok} dataset${ok!==1?'s':''} at ${new Date().toLocaleTimeString()}`;
@@ -882,7 +882,7 @@ function renderPushResults() {
     status.innerHTML = `<span style="color:var(--green)">${ok} ok</span> / <span style="color:var(--red)">${fail} failed</span> — ${failList} <button class="btn-outline" style="margin-left:8px;padding:3px 10px" onclick="pushToFirebase(true)">Retry failed</button>`;
   }
 }
- 
+
 // ── TEST CONNECTION ──────────────────────────────────────────
 async function testConnection() {
   const status = document.getElementById('commit-status');
@@ -901,19 +901,19 @@ async function testConnection() {
     status.innerHTML = `✗ ${err.message}`;
   }
 }
- 
+
 // ── INIT ─────────────────────────────────────────────────────
 function enterApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   initApp();
 }
- 
+
 function doLogout() {
   try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
   location.reload();
 }
- 
+
 function doLogin() {
   const val = document.getElementById('pw-input').value;
   if (val === APP_PASS) {
@@ -924,22 +924,22 @@ function doLogin() {
   }
 }
 document.getElementById('pw-input').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
- 
+
 // Skip login if this tab already authenticated
 try {
   if (sessionStorage.getItem(SESSION_KEY) === '1') enterApp();
 } catch(e) { /* sessionStorage unavailable */ }
- 
+
 function initApp() {
   buildGrid();
   buildTabs();
- 
+
   // Read lightweight manifest (not full data) for status panel
   DB.readManifest().then(manifest => {
     firebaseManifest = manifest || {};
     renderStatusPanel(firebaseManifest);
   });
- 
+
   // Live manifest updates
   DB.onManifest(manifest => {
     firebaseManifest = manifest || {};
@@ -949,7 +949,7 @@ function initApp() {
     }
   });
 }
- 
+
 function renderStatusPanel(manifest) {
   document.getElementById('status-loading').style.display = 'none';
   const panel = document.getElementById('status-panel');
@@ -958,7 +958,7 @@ function renderStatusPanel(manifest) {
   const checked = checkRequirements(reqs, manifest);
   panel.innerHTML = buildStatusPanel(checked);
 }
- 
+
 async function refreshStatusPanel() {
   const manifest = await DB.readManifest();
   firebaseManifest = manifest || {};

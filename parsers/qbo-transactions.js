@@ -16,13 +16,13 @@
 // "a/r", or "ar" (whole word) match. Adjust isAccountsReceivable() below
 // if Dylan renames the AR account in QBO.
 // ─────────────────────────────────────────────────────────────────────────
- 
+
 function isAccountsReceivable(accountName) {
   if (!accountName) return false;
   const n = accountName.toLowerCase();
   return /accounts\s*receivable/.test(n) || /\ba\/?r\b/.test(n);
 }
- 
+
 const PARSER_TXN = {
   id: 'qbo-transactions',
   label: 'QuickBooks — Transaction Detail by Account',
@@ -31,11 +31,11 @@ const PARSER_TXN = {
   hint: 'Export: Reports → Transaction Detail by Account → Export to CSV',
   storageStrategy: 'merge',
   expectedReportType: /transaction\s*detail/i,
- 
+
   getPeriodKey(data) {
     return data.meta?.period || 'all-dates';
   },
- 
+
   async parse(file) {
     const text = await file.text();
     const lines = text.split(/\r?\n/);
@@ -46,11 +46,11 @@ const PARSER_TXN = {
     if (headerIdx < 0) throw new Error('Could not find header row in Transaction Detail CSV');
     const reportType = lines[0] ? lines[0].split(',')[0].replace(/^"|"$/g,'').trim() : '';
     const period     = lines[2] ? lines[2].replace(/^"|"$/g,'').replace(/,+$/,'').trim() : '';
- 
+
     const dateIdx=1, typeIdx=2, nameIdx=4, splitIdx=6, amtIdx=7;
     const accounts = {};
     let currentAccount = '';
- 
+
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const cols = splitCSVRow(lines[i]);
       if (!cols) continue;
@@ -78,12 +78,12 @@ const PARSER_TXN = {
         }
       }
     }
- 
+
     const accountSummary = Object.values(accounts)
       .map(a => ({ name: a.name, total: +a.total.toFixed(2), txCount: a.txCount, isAR: a.isAR }))
       .filter(a => a.txCount > 0)
       .sort((a,b) => Math.abs(b.total) - Math.abs(a.total));
- 
+
     // Detail: top 10 accounts by absolute balance, last 100 items each.
     // EXCEPTION: AR account keeps full item history (regardless of size)
     // because computeDSOFromTransactions needs every Invoice + Payment.
@@ -99,13 +99,13 @@ const PARSER_TXN = {
       .forEach(([k,a]) => {
         accountDetail[k] = { total: +a.total.toFixed(2), items: a.items, isAR: true };
       });
- 
+
     return {
       meta: { reportType, period, parsedAt: new Date().toISOString() },
       accountSummary, accountDetail
     };
   },
- 
+
   validate(data) {
     const errors = [], warnings = [];
     if (!data.accountSummary || data.accountSummary.length === 0) {
@@ -116,7 +116,7 @@ const PARSER_TXN = {
     }
     return { errors, warnings };
   },
- 
+
   renderPreview(data) {
     const d = data;
     const rows = (d.accountSummary||[]).slice(0,20).map(a =>

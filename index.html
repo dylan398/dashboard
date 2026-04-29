@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
   Overview — the front door.
- 
+
   ▶ Read docs/CONTEXT.md §2.4 (partial-year), §2.5 (segmentation),
     §8.0 (Actionability Rule) before editing.
- 
+
     Conventions:
     • Banded ratios use _latestAnnualPL(D) — last *complete* year only.
     • Partial-year (current YTD) KPIs are tagged `.kpi.partial` so they
@@ -40,14 +40,14 @@
       <div class="page-sub">Financial snapshot of Semper Fi Striping LLC. <span class="timestamp">Last updated: <span id="last-updated">—</span></span></div>
     </div>
   </div>
- 
+
   <div id="empty-state" class="empty-state" style="display:none">
     No data yet. Go to <a href="admin.html">Admin</a> to upload your first report.
   </div>
- 
+
   <div id="dashboard-content" style="display:none">
     <div class="kpi-row cols-8" id="kpi-row"></div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Performance</span><a href="reports/pl.html">Revenue detail →</a></div>
     <div class="grid-7030">
       <div class="panel">
@@ -59,7 +59,7 @@
         <div class="chart-wrap h260"><canvas id="chart-margins"></canvas></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Cash & Working Capital</span><a href="reports/cash.html">Cash detail →</a></div>
     <div class="grid-6040">
       <div class="panel">
@@ -71,7 +71,7 @@
         <div id="bs-summary"></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>Customers, Receivables & Pipeline</span></div>
     <div class="grid-3">
       <div class="panel">
@@ -87,7 +87,7 @@
         <div id="pipeline-block"></div>
       </div>
     </div>
- 
+
     <div class="section-label"><span><span class="accent">▸</span>All Reports</span></div>
     <div class="grid-3" style="margin-bottom:24px">
       <a href="reports/insights.html" class="report-tile"><div class="report-tile-head"><span class="report-tile-name">Insights</span><span class="report-tile-arrow">→</span></div><div class="report-tile-desc">Auto-generated observations: margin trajectory, cost productivity, labor leverage, seasonal pace, pipeline velocity. Internal-lever focus.</div></a>
@@ -101,14 +101,14 @@
     </div>
   </div>
 </main>
- 
+
 <script>
 injectNavStyles();
 renderNav('overview');
 setupChartTheme();
- 
+
 let charts = {};
- 
+
 loadDashboard((D, raw) => {
   if (!D || !raw || Object.keys(raw).filter(k => !k.startsWith('_') && k !== 'meta').length === 0) {
     document.getElementById('empty-state').style.display = 'block';
@@ -117,13 +117,13 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('dashboard-content').style.display = 'block';
- 
+
   const lastUpd = D.meta?.lastUpdated;
   if (lastUpd) {
     const d = new Date(lastUpd);
     document.getElementById('last-updated').textContent = isNaN(d) ? lastUpd : d.toLocaleString();
   }
- 
+
   renderKPIs(D);
   renderPLTrend(D);
   renderMargins(D);
@@ -133,7 +133,7 @@ loadDashboard((D, raw) => {
   renderARBlock(D);
   renderPipelineBlock(D);
 });
- 
+
 // ── KPIs — partial-year aware. Margin/cost ratios show LAST COMPLETE YEAR
 //   only (banded against industry). Current-year revenue is tagged YTD so
 //   it doesn't read as a real annual number.
@@ -142,14 +142,14 @@ function renderKPIs(D) {
   const oi = D['qbo-open-invoices'] || {};
   const ar = D['qbo-ar-aging'] || {};
   const all = D['qbo-pl_all'] || {};
- 
+
   // Latest-year revenue. Use the latest year (could be YTD).
   const yearKeys = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
   const latestYr = yearKeys[yearKeys.length - 1];
   const latestPL = latestYr ? all[latestYr] : {};
   const latestStatus = (typeof _yearStatus === 'function') ? _yearStatus(D, latestYr) : { complete: true };
   const isPartial = !latestStatus.complete;
- 
+
   // Same-period YoY revenue (if partial year)
   const ytd = (typeof ytdVsPriorSamePeriod === 'function') ? ytdVsPriorSamePeriod(D) : null;
   const revSubtitle = (() => {
@@ -166,10 +166,10 @@ function renderKPIs(D) {
     }
     return 'partial year';
   })();
- 
+
   // Last-COMPLETE-year margins (the only valid place to band against industry).
   const completePL = (typeof _latestAnnualPL === 'function') ? _latestAnnualPL(D) : null;
- 
+
   // Pipeline — use applyKnowifyRules (not the stale summary).
   let pipelinePending = null, pipelineBidCount = null, pipelineExpected = null;
   const knowify = D['knowify-jobs'];
@@ -181,11 +181,11 @@ function renderKPIs(D) {
       pipelineExpected = pipelinePending * R.competitive.dollarWinRate / 100;
     }
   }
- 
+
   // Expected collections — soonest 30 days
   const fc = (typeof forecastCollections === 'function') ? forecastCollections(D) : null;
   const expected30d = fc?.buckets?.[0]?.amount || null;
- 
+
   const kpi = (label, value, opts = {}) => `
     <div class="kpi ${opts.partial ? 'partial' : ''} ${opts.href ? 'clickable' : ''}"
          style="--kpi-color:var(--${opts.color || 'border-bright'})"
@@ -194,7 +194,7 @@ function renderKPIs(D) {
       <div class="kpi-value ${opts.color || ''}">${value}</div>
       <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
     </div>`;
- 
+
   const kpis = [
     kpi(`Revenue ${latestYr || ''}`,            fmtK(latestPL.revenue), { color: 'yellow', sub: revSubtitle, partial: isPartial, href: 'reports/pl.html' }),
     kpi('Net Margin (last complete yr)',        completePL?.netMarginPct != null ? completePL.netMarginPct.toFixed(1) + '%' : '—',
@@ -214,7 +214,7 @@ function renderKPIs(D) {
   ];
   document.getElementById('kpi-row').innerHTML = kpis.join('');
 }
- 
+
 // ── Annual revenue + NI bar chart, partial year hatched
 function renderPLTrend(D) {
   const all = D['qbo-pl_all'] || {};
@@ -258,7 +258,7 @@ function renderPLTrend(D) {
       } } } },
   });
 }
- 
+
 // ── Margin chart (complete years only — partial year intentionally
 //   excluded since the ratio's denominator is suppressed by seasonality).
 function renderMargins(D) {
@@ -278,7 +278,7 @@ function renderMargins(D) {
     options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => v + '%' } } } },
   });
 }
- 
+
 function renderCashTrend(D) {
   const snaps = D['qbo-bs_all'] || {};
   const dates = Object.keys(snaps).sort();
@@ -296,7 +296,7 @@ function renderCashTrend(D) {
       plugins: { tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } },
   });
 }
- 
+
 function renderBSSummary(D) {
   const bs = D['qbo-bs'] || {};
   document.getElementById('bs-asof').textContent = bs.meta?.period || '—';
@@ -314,7 +314,7 @@ function renderBSSummary(D) {
     `<div class="stat-row"><div class="stat-row-label">${label}</div><div class="stat-row-value ${cls}">${fmt(val)}</div></div>`
   ).join('');
 }
- 
+
 // ── Customer concentration — INFORMATIONAL only (CONTEXT.md §8.0).
 //   No alarm coloring. SFS bids every job; concentration % is a context
 //   number for SBA loan narratives, not a "fix this" alert.
@@ -334,7 +334,7 @@ function renderConcentration(D) {
     </div>
     ${customerHtml}`;
 }
- 
+
 // ── AR + expected collections (no past-due framing; CONTEXT.md §2.1)
 function renderARBlock(D) {
   const oi = D['qbo-open-invoices'] || {};
@@ -345,7 +345,7 @@ function renderARBlock(D) {
   const stats = oi.invoices ? daysToPayStats(oi.invoices) : null;
   const fc = (typeof forecastCollections === 'function') ? forecastCollections(D) : null;
   const portfolio = (typeof dsoPortfolioSummary === 'function') ? dsoPortfolioSummary(D) : null;
- 
+
   const html = [`
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
       <div style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--yellow)">${fmt(totalOpen)}</div>
@@ -365,7 +365,7 @@ function renderARBlock(D) {
   }
   el.innerHTML = html.join('');
 }
- 
+
 function renderPipelineBlock(D) {
   const knowify = D['knowify-jobs'] || {};
   const el = document.getElementById('pipeline-block');

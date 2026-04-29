@@ -7,7 +7,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "183656336505",
   appId: "1:183656336505:web:48ec0547091636ab5158a8"
 };
- 
+
 let _db = null;
 function getDB() {
   if (!_db) {
@@ -16,13 +16,13 @@ function getDB() {
   }
   return _db;
 }
- 
+
 // Safe Firebase key: replace characters Firebase forbids in keys.
 // Defined before sanitize() because sanitize() now uses it on every key.
 function safeKey(str) {
   return String(str).replace(/[.$[\]#/]/g, '_').replace(/\s+/g, '_').slice(0, 768);
 }
- 
+
 // Sanitize for Firebase write:
 // - drops undefined (Firebase rejects)
 // - safeKey()s every object key (Firebase forbids . # $ / [ ] in keys)
@@ -42,24 +42,24 @@ function sanitize(obj) {
   }
   return out;
 }
- 
+
 const DB = {
   // Full replace at a path (used internally)
   async set(path, data) {
     await getDB().ref(path).set(sanitize(data));
   },
- 
+
   // Shallow merge at a path (preserves sibling keys)
   async update(path, data) {
     await getDB().ref(path).update(sanitize(data));
   },
- 
+
   // Read a path
   async read(path) {
     const snap = await getDB().ref(path).once('value');
     return snap.val();
   },
- 
+
   // ── STRATEGY: PERIOD ──────────────────────────────────────────
   // Stores data keyed by period. Overwrites same period, preserves others.
   // Path: dashboard/[datasetId]/periods/[periodKey]
@@ -76,20 +76,20 @@ const DB = {
     existing[key] = { savedAt: new Date().toISOString(), period: data.meta?.period || key };
     await this.updateManifest(datasetId, { periods: existing, latest: key });
   },
- 
+
   async readLatestPeriod(datasetId) {
     const base = `dashboard/${datasetId}`;
     const latestKey = await this.read(`${base}/latest`);
     if (!latestKey) return null;
     return this.read(`${base}/periods/${latestKey}`);
   },
- 
+
   async readAllPeriods(datasetId) {
     const data = await this.read(`dashboard/${datasetId}/periods`);
     if (!data) return {};
     return data;
   },
- 
+
   // ── STRATEGY: SNAPSHOT ───────────────────────────────────────
   // Every snapshot stored forever, keyed by its as-of date.
   // Path: dashboard/[datasetId]/snapshots/[dateKey]
@@ -107,19 +107,19 @@ const DB = {
     existingKeys[key] = { savedAt: new Date().toISOString(), period: data.meta?.period || key };
     await this.updateManifest(datasetId, { snapshots: existingKeys, latestDate: key });
   },
- 
+
   async readLatestSnapshot(datasetId) {
     const latestDate = await this.read(`dashboard/${datasetId}/latestDate`);
     if (!latestDate) return null;
     return this.read(`dashboard/${datasetId}/snapshots/${latestDate}`);
   },
- 
+
   async readAllSnapshots(datasetId) {
     const data = await this.read(`dashboard/${datasetId}/snapshots`);
     if (!data) return {};
     return data;
   },
- 
+
   // ── STRATEGY: MERGE ──────────────────────────────────────────
   // For time-series data: merges new records into existing.
   // Uses Firebase update() so only touched keys change.
@@ -130,7 +130,7 @@ const DB = {
   async mergeSalesData(newData) {
     const base = 'dashboard/qbo-sales';
     const existing = await this.read(base) || {};
- 
+
     // Merge monthlyByYear: newer data wins per month
     const merged = JSON.parse(JSON.stringify(existing.monthlyByYear || {}));
     Object.entries(newData.monthlyByYear || {}).forEach(([yr, months]) => {
@@ -139,13 +139,13 @@ const DB = {
         if (v && v > 0) merged[yr][i] = v; // newer upload overwrites
       });
     });
- 
+
     // Rebuild annual totals from merged monthly
     const annualTotals = {};
     Object.entries(merged).forEach(([yr, months]) => {
       annualTotals[yr] = +months.reduce((s, v) => s + (v || 0), 0).toFixed(2);
     });
- 
+
     // Merge customers: sum across all uploads, keep highest per customer
     const custMap = {};
     (existing.topCustomers || []).forEach(c => { custMap[c.name] = c; });
@@ -153,7 +153,7 @@ const DB = {
       if (!custMap[c.name] || c.total > custMap[c.name].total) custMap[c.name] = c;
     });
     const topCustomers = Object.values(custMap).sort((a, b) => b.total - a.total).slice(0, 25);
- 
+
     // Merge services: same logic
     const svcMap = {};
     (existing.topServices || []).forEach(s => { svcMap[s.name] = s; });
@@ -161,9 +161,9 @@ const DB = {
       if (!svcMap[s.name] || s.amount > svcMap[s.name].amount) svcMap[s.name] = s;
     });
     const topServices = Object.values(svcMap).sort((a, b) => b.amount - a.amount).slice(0, 20);
- 
+
     const totalRevenue = +Object.values(annualTotals).reduce((s, v) => s + v, 0).toFixed(2);
- 
+
     const merged_data = sanitize({
       monthlyByYear: merged,
       annualTotals,
@@ -182,7 +182,7 @@ const DB = {
       updatedAt: new Date().toISOString()
     });
   },
- 
+
   async mergeTransactionData(newData) {
     const base = 'dashboard/qbo-transactions';
     const existing = await this.read(base) || {};
@@ -191,7 +191,7 @@ const DB = {
       // Newer upload wins for summary (more complete data assumed)
       existingAccts[a.name] = a;
     });
- 
+
     // Merge accountDetail item-by-item with deduping. The qbo-transactions
     // export covers a date range; if Dylan uploads "All Time" this overlaps
     // with prior uploads. Deduping by date|type|name|amount keeps history
@@ -239,7 +239,7 @@ const DB = {
         items: info.items.sort((a, b) => new Date(a.date) - new Date(b.date)),
       };
     });
- 
+
     const merged = sanitize({
       accountSummary: Object.values(existingAccts).sort((a,b) => Math.abs(b.total)-Math.abs(a.total)),
       accountDetail: cleanedDetail,
@@ -256,7 +256,7 @@ const DB = {
       period: newData.meta?.period || ''
     });
   },
- 
+
   async mergeKnowifyData(newData) {
     const base = 'dashboard/knowify-jobs';
     // Always write the summary fresh (it reflects current state)
@@ -269,7 +269,7 @@ const DB = {
       totalWonCV: newData.summary?.totalWonCV || 0
     });
   },
- 
+
   // ── META & MANIFEST ────────────────────────────────────────────
   async writeMeta(datasets) {
     await this.set('dashboard/meta', sanitize({
@@ -278,33 +278,33 @@ const DB = {
       updatedBy: 'admin'
     }));
   },
- 
+
   // Lightweight manifest — only stores keys/dates, not full data
   // Status panel reads this instead of entire dashboard
   async updateManifest(datasetId, updates) {
     await getDB().ref(`dashboard/_manifest/${datasetId}`)
       .update(sanitize({ ...updates, _ts: new Date().toISOString() }));
   },
- 
+
   async readManifest() {
     const snap = await getDB().ref('dashboard/_manifest').once('value');
     return snap.val() || {};
   },
- 
+
   onManifest(cb) {
     getDB().ref('dashboard/_manifest').on('value', snap => cb(snap.val() || {}));
   },
- 
+
   // ── READS FOR DASHBOARD ────────────────────────────────────────
   async readAll() {
     const snap = await getDB().ref('dashboard').once('value');
     return snap.val() || {};
   },
- 
+
   onAll(cb) {
     getDB().ref('dashboard').on('value', snap => cb(snap.val() || {}));
   },
- 
+
   // Legacy compat
   async write(key, data) {
     await this.set('dashboard/' + key, sanitize(data));
@@ -312,7 +312,7 @@ const DB = {
   async readLegacy(key) {
     return this.read('dashboard/' + key);
   },
- 
+
   onValue(key, cb) {
     getDB().ref('dashboard/' + key).on('value', snap => cb(snap.val()));
   }
