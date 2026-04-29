@@ -1,4 +1,29 @@
 <!DOCTYPE html>
+<!--
+  Pipeline — FORWARD VISIBILITY only.
+ 
+  ▶ Read docs/CONTEXT.md §8.0 (Actionability Rule) before editing.
+ 
+    SFS bids every job they can. They are NOT picky. So this page is
+    NOT "which GCs should we pursue" or "which leads should we chase."
+    It IS "given what we've already bid, what does forward booking and
+    cash flow look like for the next 60-90 days?"
+ 
+    Framing that's allowed:
+      • "Pending bid value × historical win rate = expected revenue floor"
+      • "Median time-to-award is X days — plan crew/equipment for that lag"
+      • "Pending volume by GC — where the book of bids currently sits"
+      • Multi-GC dedup count (informational — same project bid through N GCs)
+      • Knowify rule reclassifications (data quality)
+ 
+    Framing that's NOT allowed:
+      • "Pursue these GCs"
+      • "Focus on these sales leads"
+      • "Chase these stale bids"
+      • Anything that implies SFS chooses bids selectively
+ 
+    Source of truth: applyKnowifyRules() in core/dash.js
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -8,336 +33,391 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js"></script>
-<script src="../core/utils.js"></script>
-<script src="../core/dash.js"></script>
-<script src="../core/nav.js"></script>
+<script src="../core/firebase.js?v=8"></script>
+<script src="../core/utils.js?v=8"></script>
+<script src="../core/dash.js?v=8"></script>
+<script src="../core/nav.js?v=8"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
   --border:#252a38;--border-bright:#2e3448;
-  --yellow:#f5c842;--yellow-dim:#c9a02e;--orange:#e07b2b;
-  --red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
   --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
   --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
 a{color:inherit;text-decoration:none}
-
+ 
 .main{padding:24px 28px;max-width:1700px;margin:0 auto}
 .page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
-.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:16px}
+.page-note{background:var(--bg-card);border-left:3px solid var(--yellow);padding:10px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:24px;line-height:1.55}
+.page-note b{color:var(--txt-primary)}
+ 
 .section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
 .section-label .accent{color:var(--yellow);margin-right:6px}
-
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
-.grid-6040{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
-
-.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
+ 
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
 .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi.yellow{--kpi-color:var(--yellow)}
+.kpi.blue{--kpi-color:var(--blue)}
+.kpi.green{--kpi-color:var(--green)}
+.kpi.purple{--kpi-color:var(--purple)}
 .kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
-.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
-.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
-.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
-
-.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
-.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
-
-/* Rules block — explains the transformation up front */
-.rules-block{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--yellow);padding:18px 22px;margin-bottom:18px}
-.rules-title{font-family:var(--font-display);font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--yellow);margin-bottom:12px}
-.rule{display:grid;grid-template-columns:170px 1fr;gap:14px;padding:7px 0;font-size:12px;border-bottom:1px solid var(--border)}
-.rule:last-child{border-bottom:none}
-.rule-name{color:var(--txt-secondary);font-weight:600}
-.rule-name::before{content:'›';color:var(--yellow);margin-right:6px}
-.rule-text{color:var(--txt-secondary);line-height:1.5}
-.rule-text strong{color:var(--txt-primary)}
-
-/* Funnel */
-.funnel{display:flex;flex-direction:column;gap:6px;padding:10px 0}
-.funnel-step{display:grid;grid-template-columns:140px 1fr 90px;align-items:center;gap:10px;font-size:13px}
-.funnel-bar{height:24px;background:var(--bg-hover);border:1px solid var(--border);position:relative;overflow:hidden}
-.funnel-fill{height:100%;background:var(--yellow);transition:width .3s}
-.funnel-label{color:var(--txt-secondary);font-family:var(--font-display);text-transform:uppercase;letter-spacing:.04em;font-size:12px;font-weight:600}
-.funnel-value{font-family:var(--font-mono);text-align:right;font-size:13px;font-weight:600;color:var(--txt-primary)}
-.funnel-step.win .funnel-fill{background:var(--green)}
-.funnel-step.loss .funnel-fill{background:var(--red);opacity:.7}
-.funnel-step.pending .funnel-fill{background:var(--yellow)}
-.funnel-step.excluded .funnel-fill{background:var(--purple);opacity:.6}
-
-/* Tables */
-.t{width:100%;border-collapse:collapse;font-size:12px}
-.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
-.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
-.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
-.t td.muted{color:var(--txt-muted);font-size:11px}
-.t td .pct{display:inline-block;font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:2px;border:1px solid currentColor}
-.win-rate.high{color:var(--green)}.win-rate.mid{color:var(--yellow)}.win-rate.low{color:var(--red)}
-.t tr:hover{background:var(--bg-hover)}
-.t-scroll{max-height:480px;overflow-y:auto;background:var(--bg-card)}
-
-.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
-.empty-state a{color:var(--yellow)}
-
-.tag{display:inline-block;font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid;letter-spacing:.04em}
-.tag.multi{border-color:var(--purple);color:var(--purple)}
-.tag.stale{border-color:var(--orange);color:var(--orange)}
-.tag.unbilled{border-color:var(--orange);color:var(--orange)}
-
-.note{background:rgba(74,158,255,.06);border-left:2px solid var(--blue);padding:8px 12px;font-size:12px;color:var(--txt-secondary);margin-top:10px;line-height:1.5}
-.note strong{color:var(--blue)}
-
-.chart-wrap{position:relative;width:100%}
-.chart-wrap.h220{height:220px}
-.chart-wrap.h280{height:280px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:600;color:var(--txt-primary)}
+.kpi-sub{font-size:11px;color:var(--txt-secondary);margin-top:4px}
+ 
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:16px;margin-bottom:14px}
+.panel-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{color:var(--txt-muted);font-size:10px;letter-spacing:.05em;text-transform:none;font-weight:400}
+.panel-body{color:var(--txt-secondary);font-size:13px;line-height:1.55}
+.panel-body b{color:var(--txt-primary)}
+ 
+.grid-2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+ 
+.metric-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--border)}
+.metric-row:last-child{border-bottom:none}
+.metric-label{color:var(--txt-secondary);font-size:12.5px}
+.metric-value{font-family:var(--font-mono);font-size:13px;color:var(--txt-primary);font-weight:500}
+ 
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
+th.num,td.num{text-align:right;font-family:var(--font-mono)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary)}
+tr:hover td{background:var(--bg-hover)}
+ 
+.chart-box{position:relative;height:280px}
+.chart-box.tall{height:340px}
+.chart-box.short{height:200px}
+ 
+.tag{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10px;letter-spacing:.05em;font-weight:600}
+.tag.muted{background:rgba(138,144,160,.15);color:var(--txt-secondary)}
+.tag.info{background:rgba(74,158,255,.15);color:var(--blue)}
+.tag.yellow{background:rgba(245,200,66,.15);color:var(--yellow)}
+ 
+.empty{color:var(--txt-muted);font-style:italic;padding:20px;text-align:center}
+.subtle-divider{height:1px;background:var(--border);margin:14px 0}
+ 
+.velocity-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.velocity-cell{background:var(--bg-panel);padding:12px;text-align:center}
+.velocity-cell .lbl{font-size:10px;color:var(--txt-muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+.velocity-cell .val{font-family:var(--font-mono);font-size:24px;color:var(--txt-primary);font-weight:600}
+.velocity-cell .unit{font-size:11px;color:var(--txt-secondary);margin-top:2px}
+ 
+.pill{display:inline-block;padding:2px 6px;background:var(--bg-panel);border-radius:2px;font-family:var(--font-mono);font-size:11px;color:var(--txt-secondary);margin-right:6px}
 </style>
 </head>
 <body>
-<main class="main">
-  <div class="page-title">Pipeline</div>
-  <div class="page-sub">Knowify bid pipeline with the SFS rule set applied. <span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:11px">As of <span id="as-of">—</span></span></div>
-
-  <div id="empty-state" class="empty-state" style="display:none">
-    No Knowify data yet. Go to <a href="../admin.html">Admin</a> and upload an Advanced Jobs Report.
+<div id="nav-mount"></div>
+ 
+<div class="main">
+  <div class="page-title">PIPELINE</div>
+  <div class="page-sub">Forward booking visibility — capacity & cash planning, not bid selection.</div>
+ 
+  <div class="page-note">
+    <b>How to read this page:</b> SFS bids every job they can — this isn't a "which leads to chase" page.
+    It's a forward-visibility page. The top number to watch is the <b>expected booking floor</b>
+    (pending bid $ × historical $-weighted win rate). That's a planning floor for crews and equipment over the
+    next 60–90 days. Everything below it is supporting context: how fast the GC market is awarding, where pending
+    volume currently sits, and how the data was reclassified per the SFS Knowify rules.
   </div>
-
-  <div id="content" style="display:none">
-    <!-- Rules block (always visible — establishes how the data is being interpreted) -->
-    <div class="rules-block">
-      <div class="rules-title">Four rules applied to raw Knowify data</div>
-      <div class="rule"><div class="rule-name">Stale bids → losses</div><div class="rule-text">Bidding-status jobs older than <strong>120 days</strong> → loss. Awards happen in 30–60 days. Anything open after 120 days is effectively lost.</div></div>
-      <div class="rule"><div class="rule-name">Unbilled closed → losses</div><div class="rule-text">Closed with <strong>0% billed</strong> → loss. No invoice = no revenue.</div></div>
-      <div class="rule"><div class="rule-name">Relationship leads excluded</div><div class="rule-text">Jobs led by <strong>James Thetford, Tyler Petty, or Jenna Napier</strong> excluded. These are pre-sold — outcome not determined by price competitiveness.</div></div>
-      <div class="rule"><div class="rule-name">Competitive channel</div><div class="rule-text">Estimating Department, blank Sales Lead, all Rejected jobs. <strong>Used for all win-rate calculations below.</strong></div></div>
-      <div class="rule"><div class="rule-name">Multi-GC dedup noted</div><div class="rule-text" id="multi-gc-rule">— calculating —</div></div>
+ 
+  <!-- ═══════ KPI ROW ═══════ -->
+  <div class="kpi-row" id="kpiRow"></div>
+ 
+  <!-- ═══════ FORWARD BOOKING FLOOR ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Forward booking floor</span><span class="hint">Pending value × historical $-win rate</span></div>
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Expected Wins From Current Pipeline</div>
+      <div id="forecastBlock" class="panel-body"></div>
     </div>
-
-    <!-- KPI strip -->
-    <div class="kpi-row" id="kpi-row"></div>
-
-    <!-- Funnel + Sales-lead breakdown -->
-    <div class="grid-6040">
-      <div class="panel">
-        <div class="panel-title"><span>Competitive Pipeline Funnel</span><span class="meta">After rules applied</span></div>
-        <div id="funnel"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title"><span>By Sales Lead</span><span class="meta">Competitive set</span></div>
-        <div class="t-scroll"><table class="t" id="t-leads"><thead><tr><th>Lead</th><th>Bids</th><th>Wins</th><th>Win %</th></tr></thead><tbody></tbody></table></div>
+    <div class="panel">
+      <div class="panel-title">Bid → Award Velocity <span class="meta">days from creation to today, won bids only</span></div>
+      <div id="velocityBlock"></div>
+      <div class="panel-body" style="margin-top:10px;font-size:12px;color:var(--txt-muted)">
+        Knowify doesn't record an award timestamp, so this approximates time-to-award as creation→today
+        for jobs that ultimately won. Use it as a leading indicator of how fast the GC market is moving.
       </div>
     </div>
-
-    <!-- Top GCs -->
-    <div class="section-label"><span><span class="accent">▸</span> General Contractors</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">competitive bids only · sorted by total bid value</span></div>
-    <div class="panel" style="padding:0">
-      <div class="t-scroll" style="max-height:520px"><table class="t" id="t-gcs"><thead><tr><th>GC</th><th>Bids</th><th>Wins</th><th>Losses</th><th>Pending</th><th>Win %</th><th>Won $</th><th>Pending $</th><th>Total bid $</th></tr></thead><tbody></tbody></table></div>
-    </div>
-
-    <!-- Multi-GC projects + Stale reclassifications -->
-    <div class="section-label"><span><span class="accent">▸</span> Reclassifications & Multi-GC Projects</span></div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-title"><span>Bids reclassified as losses</span><span class="meta" id="reclass-meta">—</span></div>
-        <div class="t-scroll" style="max-height:380px"><table class="t" id="t-reclass"><thead><tr><th>Why</th><th>GC</th><th>Job</th><th>Created</th><th>Days</th><th>Value</th></tr></thead><tbody></tbody></table></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title"><span>Multi-GC projects</span><span class="meta" id="multi-meta">—</span></div>
-        <div class="t-scroll" style="max-height:380px"><table class="t" id="t-multi"><thead><tr><th>Project</th><th>GCs bid through</th><th>Total $</th><th>Won?</th></tr></thead><tbody></tbody></table></div>
-        <div class="note"><strong>Why this matters:</strong> only one GC can win the prime contract. When SFS loses these bids it's often because <em>the GC didn't win the prime</em>, not because we were outbid. Win rate by GC is still the right metric — it tells you which GCs to pursue — but the loss <em>count</em> overstates competitive losses.</div>
-      </div>
-    </div>
-
-    <!-- Relationship channel summary -->
-    <div class="section-label"><span><span class="accent">▸</span> Relationship Channel</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Excluded from win-rate calculations · pre-sold</span></div>
-    <div class="panel" id="relationship-panel"></div>
   </div>
-</main>
-
+ 
+  <!-- ═══════ HEALTH OF THE FUNNEL (DESCRIPTIVE) ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Funnel shape</span><span class="hint">Competitive bids only — relationship channel separate</span></div>
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Competitive Funnel</div>
+      <div id="funnelStats"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Won vs Lost vs Pending Contract Value</div>
+      <div class="chart-box short"><canvas id="cvChart"></canvas></div>
+    </div>
+  </div>
+ 
+  <!-- ═══════ PENDING VOLUME BY GC ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Where pending volume currently sits</span><span class="hint">Descriptive — not "where to focus"</span></div>
+  <div class="panel">
+    <div class="panel-title">GC Breakdown <span class="meta">sorted by total contract value bid</span></div>
+    <div class="panel-body" style="margin-bottom:10px">
+      Same project gets bid through multiple GCs at once, so per-GC win rates are a noisy
+      signal. <span class="pill">Multi-GC bids tagged below</span>
+    </div>
+    <div style="overflow-x:auto"><table id="gcTable"></table></div>
+  </div>
+ 
+  <!-- ═══════ SALES LEAD BREAKDOWN ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Bids by sales lead</span><span class="hint">Capacity context — who owns what volume</span></div>
+  <div class="panel">
+    <div class="panel-title">Sales Lead Distribution</div>
+    <div style="overflow-x:auto"><table id="leadTable"></table></div>
+  </div>
+ 
+  <!-- ═══════ DATA QUALITY ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Knowify rule reclassifications</span><span class="hint">Data quality — see CONTEXT.md §3</span></div>
+  <div class="grid-3">
+    <div class="panel">
+      <div class="panel-title">Stale Bid Reclassifications</div>
+      <div class="panel-body"><span id="staleCount" style="font-family:var(--font-mono);font-size:22px;color:var(--yellow);font-weight:600"></span>
+        <div style="margin-top:8px">Bids in <code>Bidding</code> over 60 days old that we treated as <b>lost</b>. Otherwise these would inflate the pending pipeline.</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Unbilled-Closed Reclassifications</div>
+      <div class="panel-body"><span id="unbilledCount" style="font-family:var(--font-mono);font-size:22px;color:var(--yellow);font-weight:600"></span>
+        <div style="margin-top:8px">Jobs Knowify shows as <code>Closed</code> with $0 invoiced — treated as <b>lost</b> per Dylan's rule.</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Multi-GC Project Dedup</div>
+      <div class="panel-body"><span id="multiGCCount" style="font-family:var(--font-mono);font-size:22px;color:var(--yellow);font-weight:600"></span>
+        <div style="margin-top:8px">Bids across <span id="multiGCProjects" style="color:var(--txt-primary);font-weight:600"></span> projects that were bid through multiple GCs simultaneously. Counted per-GC-bid (the right unit for "how many shots did we take"), but flagged so per-GC win rates aren't read literally.</div>
+      </div>
+    </div>
+  </div>
+ 
+  <!-- ═══════ RELATIONSHIP CHANNEL ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Relationship channel</span><span class="hint">Direct-relationship work — separate from competitive bidding</span></div>
+  <div class="panel">
+    <div class="panel-title">Direct & Repeat Customer Work</div>
+    <div id="relBlock" class="panel-body"></div>
+  </div>
+ 
+  <div class="section-label"><span><span class="accent">▸</span>Knowify ruleset (transparency)</span></div>
+  <div class="panel" style="font-size:12.5px;color:var(--txt-secondary);line-height:1.7">
+    <ol style="padding-left:20px;margin:0">
+      <li><b>Bidding sheet</b> = the live competitive funnel (pending bids).</li>
+      <li><b>Active sheet</b> + <b>Closed sheet w/ &gt; $0 invoiced</b> = wins.</li>
+      <li><b>Rejected sheet</b> + <b>Closed w/ $0 invoiced</b> + <b>stale Bidding (&gt;60 days old)</b> = losses.</li>
+      <li><b>Relationship leads</b> (Veronica, Mona, Aaron, Joe, Larry, Tyler, Marcello, Mom — see <code>RELATIONSHIP_LEADS</code> in dash.js) are tagged <em>relationship</em> and excluded from competitive win-rate math.</li>
+      <li><b>Multi-GC bids:</b> the same project bid through multiple GCs is annotated, not removed. Per-GC-bid is the right unit for asking "how many shots are open"; per-project is the right unit for "how many real opportunities exist."</li>
+    </ol>
+    <div style="margin-top:12px;color:var(--txt-muted);font-size:12px">
+      Source: <code>applyKnowifyRules()</code> in <code>core/dash.js</code>. The full ruleset lives there in one place — don't re-implement.
+    </div>
+  </div>
+</div>
+ 
 <script>
-injectNavStyles();
-renderNav('pipeline');
-setupChartTheme();
-
-loadDashboard((D, raw) => {
-  const knowify = D?.['knowify-jobs'];
-  if (!knowify || !knowify.jobs) {
-    document.getElementById('empty-state').style.display = 'block';
-    document.getElementById('content').style.display = 'none';
-    return;
-  }
-  document.getElementById('empty-state').style.display = 'none';
-  document.getElementById('content').style.display = 'block';
-
-  const exportedDate = knowify.meta?.parsedAt?.slice(0, 10) || '—';
-  document.getElementById('as-of').textContent = exportedDate;
-
-  const result = applyKnowifyRules(knowify.jobs);
-  renderMultiGCRule(result);
-  renderKPIs(result);
-  renderFunnel(result);
-  renderLeadsTable(result);
-  renderGCsTable(result);
-  renderReclassTable(result);
-  renderMultiGCTable(result);
-  renderRelationship(result);
-});
-
-function renderMultiGCRule(r) {
-  const m = r.multiGC;
-  const c = r.competitive;
-  const pct = c.jobs.length ? ((m.bidsInMultiGCProjects / c.jobs.length) * 100).toFixed(0) : 0;
-  document.getElementById('multi-gc-rule').innerHTML =
-    `<strong>${fmtNum(m.bidsInMultiGCProjects)} bids (${pct}% of competitive)</strong> are part of <strong>${fmtNum(m.projectCount)}</strong> projects sent to multiple GCs simultaneously — ${m.avgGCsPerProject} GCs per project on average. Per-GC win rate is the right metric to evaluate which GCs to pursue, but loss counts include duplicates.`;
+function fmt$(n){
+  if (n == null || !isFinite(n)) return '—';
+  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(0) + 'k';
+  return '$' + Math.round(n).toLocaleString();
 }
-
-function renderKPIs(r) {
-  const c = r.competitive;
-  const winRate = c.winRate;
-  const wrColor = winRate == null ? 'orange' : winRate >= 25 ? 'green' : winRate >= 15 ? 'yellow' : 'red';
-  const dollarColor = c.dollarWinRate == null ? 'orange' : c.dollarWinRate >= 25 ? 'green' : c.dollarWinRate >= 15 ? 'yellow' : 'red';
-  const kpis = [
-    { label: 'Competitive bids', value: fmtNum(c.jobs.length), color: 'blue', sub: `${r.rawCounts.Bidding + r.rawCounts.Active + r.rawCounts.Closed + r.rawCounts.Rejected} total raw` },
-    { label: 'Win rate', value: winRate != null ? winRate + '%' : '—', color: wrColor, sub: `${c.wins} wins / ${c.losses} losses` },
-    { label: 'Dollar win rate', value: c.dollarWinRate != null ? c.dollarWinRate + '%' : '—', color: dollarColor, sub: 'Won $ / decided $' },
-    { label: 'Pending value', value: fmtK(c.pendingCV), color: 'yellow', sub: `${c.pending} pending bids` },
-    { label: 'Won contract value', value: fmtK(c.wonCV), color: 'green', sub: `${c.wins} wins` },
-    { label: 'Reclassified', value: fmtNum(c.reclassifiedStale + c.reclassifiedUnbilled), color: 'orange', sub: `${c.reclassifiedStale} stale · ${c.reclassifiedUnbilled} unbilled` },
-  ];
-  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
-    <div class="kpi" style="--kpi-color:var(--${k.color})">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value ${k.color}">${k.value}</div>
-      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
-    </div>`).join('');
-}
-
-function renderFunnel(r) {
-  const c = r.competitive;
-  const total = c.jobs.length || 1;
-  const steps = [
-    { cls: '',        label: 'Total competitive', count: c.jobs.length, val: '' },
-    { cls: 'pending', label: 'Pending',           count: c.pending,     val: fmtK(c.pendingCV) },
-    { cls: 'win',     label: 'Wins',              count: c.wins,        val: fmtK(c.wonCV) },
-    { cls: 'loss',    label: 'Losses',            count: c.losses,      val: fmtK(c.lostCV) },
-  ];
-  document.getElementById('funnel').innerHTML = `<div class="funnel">${steps.map(s => `
-    <div class="funnel-step ${s.cls}">
-      <div class="funnel-label">${s.label}</div>
-      <div class="funnel-bar"><div class="funnel-fill" style="width:${(s.count/total*100).toFixed(1)}%"></div></div>
-      <div class="funnel-value">${fmtNum(s.count)} ${s.val ? '· ' + s.val : ''}</div>
-    </div>`).join('')}</div>`;
-}
-
-function renderLeadsTable(r) {
-  const tbody = document.querySelector('#t-leads tbody');
-  tbody.innerHTML = r.byLead.map(l => {
-    const wrCls = l.winRate == null ? '' : l.winRate >= 25 ? 'high' : l.winRate >= 15 ? 'mid' : 'low';
-    return `<tr>
-      <td>${l.lead}</td>
-      <td class="num">${fmtNum(l.bids)}</td>
-      <td class="num">${l.wins}</td>
-      <td class="num win-rate ${wrCls}">${l.winRate != null ? l.winRate + '%' : '—'}</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderGCsTable(r) {
-  const tbody = document.querySelector('#t-gcs tbody');
-  tbody.innerHTML = r.byGC.map(g => {
-    const wrCls = g.winRate == null ? '' : g.winRate >= 25 ? 'high' : g.winRate >= 15 ? 'mid' : 'low';
-    return `<tr>
-      <td><strong>${g.gc}</strong></td>
-      <td class="num">${fmtNum(g.bids)}</td>
-      <td class="num">${g.wins}</td>
-      <td class="num">${g.losses}</td>
-      <td class="num">${g.pending}</td>
-      <td class="num win-rate ${wrCls}">${g.winRate != null ? g.winRate + '%' : '—'}</td>
-      <td class="num">${fmtK(g.wonCV)}</td>
-      <td class="num">${fmtK(g.pendingCV)}</td>
-      <td class="num">${fmtK(g.totalCV)}</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderReclassTable(r) {
-  const reclassified = r.competitive.jobs.filter(j => j.reclassReason);
-  document.getElementById('reclass-meta').textContent = `${reclassified.length} jobs flipped to losses`;
-  const tbody = document.querySelector('#t-reclass tbody');
-  tbody.innerHTML = reclassified.slice(0, 200).map(j => {
-    const reasonTag = j.reclassReason === 'stale-bid'
-      ? '<span class="tag stale">stale</span>'
-      : '<span class="tag unbilled">unbilled</span>';
-    return `<tr>
-      <td>${reasonTag}</td>
-      <td class="muted">${j.client || '—'}</td>
-      <td>${j.jobName || '—'}</td>
-      <td class="muted">${j.createdDate || '—'}</td>
-      <td class="num">${j.ageDays != null ? j.ageDays + 'd' : '—'}</td>
-      <td class="num">${fmtK(j.contractTotal)}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--txt-muted)">No reclassifications.</td></tr>';
-}
-
-function renderMultiGCTable(r) {
-  const competitive = r.competitive.jobs;
-  // Group by normalized job name → list of bids
-  const byProject = {};
-  competitive.forEach(j => {
-    if (!j.isMultiGC) return;
-    const key = (j.jobName || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!key) return;
-    if (!byProject[key]) byProject[key] = { name: j.jobName, gcs: new Set(), totalCV: 0, wonAny: false, bids: [] };
-    byProject[key].gcs.add(j.client || '—');
-    byProject[key].totalCV += j.contractTotal || 0;
-    if (j.outcome === 'win') byProject[key].wonAny = true;
-    byProject[key].bids.push(j);
-  });
-  const projects = Object.values(byProject).sort((a, b) => b.totalCV - a.totalCV);
-  document.getElementById('multi-meta').textContent = `${projects.length} projects · ${r.multiGC.bidsInMultiGCProjects} bids`;
-  const tbody = document.querySelector('#t-multi tbody');
-  tbody.innerHTML = projects.slice(0, 200).map(p => `
-    <tr>
-      <td>${p.name}</td>
-      <td class="num">${p.gcs.size}</td>
-      <td class="num">${fmtK(p.totalCV)}</td>
-      <td class="num">${p.wonAny ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--txt-muted)">—</span>'}</td>
-    </tr>`).join('') || '<tr><td colspan="4" style="padding:30px;text-align:center;color:var(--txt-muted)">No multi-GC projects.</td></tr>';
-}
-
-function renderRelationship(r) {
-  const rel = r.relationship;
-  const el = document.getElementById('relationship-panel');
-  if (rel.bids === 0) {
-    el.innerHTML = '<div class="empty-state">No relationship-channel jobs.</div>';
-    return;
-  }
-  // Break down by lead
-  const byLead = {};
-  rel.jobs.forEach(j => {
-    const lead = j.salesLead || '—';
-    if (!byLead[lead]) byLead[lead] = { lead, bids: 0, wonCV: 0, won: 0 };
-    byLead[lead].bids++;
-    if (j.originalStatus === 'Active' || (j.originalStatus === 'Closed' && (j.invoiced || 0) > 0)) {
-      byLead[lead].won++;
-      byLead[lead].wonCV += j.contractTotal || 0;
-    }
-  });
-  const leadRows = Object.values(byLead).sort((a, b) => b.wonCV - a.wonCV).map(l =>
-    `<tr><td><strong>${l.lead}</strong></td><td class="num">${l.bids}</td><td class="num">${l.won}</td><td class="num">${fmtK(l.wonCV)}</td></tr>`
-  ).join('');
-  el.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px">
-      <div class="kpi" style="--kpi-color:var(--purple)"><div class="kpi-label">Relationship bids</div><div class="kpi-value blue">${rel.bids}</div><div class="kpi-sub">Pre-sold</div></div>
-      <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-label">Won jobs</div><div class="kpi-value green">${rel.wonCount}</div><div class="kpi-sub">&nbsp;</div></div>
-      <div class="kpi" style="--kpi-color:var(--yellow)"><div class="kpi-label">Won contract value</div><div class="kpi-value yellow">${fmtK(rel.wonCV)}</div><div class="kpi-sub">&nbsp;</div></div>
+function fmtPct(n){ return n == null || !isFinite(n) ? '—' : n.toFixed(1) + '%'; }
+function el(id){ return document.getElementById(id); }
+ 
+function renderKPIs(R){
+  const c = R.competitive;
+  const expected = (c.pendingCV || 0) * (c.dollarWinRate || 0) / 100;
+  el('kpiRow').innerHTML = `
+    <div class="kpi yellow">
+      <div class="kpi-label">Pending bid value</div>
+      <div class="kpi-value">${fmt$(c.pendingCV)}</div>
+      <div class="kpi-sub">${c.pending} active bid${c.pending===1?'':'s'} (live funnel only)</div>
     </div>
-    <table class="t"><thead><tr><th>Sales Lead</th><th>Total bids</th><th>Won</th><th>Won $</th></tr></thead><tbody>${leadRows}</tbody></table>`;
+    <div class="kpi blue">
+      <div class="kpi-label">Expected booking floor</div>
+      <div class="kpi-value">${fmt$(expected)}</div>
+      <div class="kpi-sub">pending × ${fmtPct(c.dollarWinRate)} historical $-win rate</div>
+    </div>
+    <div class="kpi green">
+      <div class="kpi-label">Won contract value (decided)</div>
+      <div class="kpi-value">${fmt$(c.wonCV)}</div>
+      <div class="kpi-sub">${c.wins} wins / ${c.decidedCount} decided bids</div>
+    </div>
+    <div class="kpi purple">
+      <div class="kpi-label">$-weighted win rate</div>
+      <div class="kpi-value">${fmtPct(c.dollarWinRate)}</div>
+      <div class="kpi-sub">won $ ÷ (won $ + lost $); informational only</div>
+    </div>`;
 }
+ 
+function renderForecast(R){
+  const c = R.competitive;
+  if (!c || c.dollarWinRate == null) {
+    el('forecastBlock').innerHTML = '<div class="empty">Not enough decided history yet to project forward bookings.</div>';
+    return;
+  }
+  const expected = c.pendingCV * c.dollarWinRate / 100;
+  el('forecastBlock').innerHTML = `
+    <div class="metric-row"><div class="metric-label">Pending bid value (live)</div><div class="metric-value">${fmt$(c.pendingCV)}</div></div>
+    <div class="metric-row"><div class="metric-label">Pending bid count</div><div class="metric-value">${c.pending}</div></div>
+    <div class="metric-row"><div class="metric-label">Historical $-weighted win rate</div><div class="metric-value">${fmtPct(c.dollarWinRate)}</div></div>
+    <div class="metric-row"><div class="metric-label" style="color:var(--yellow);font-weight:600">Expected wins (planning floor)</div><div class="metric-value" style="color:var(--yellow);font-size:15px">${fmt$(expected)}</div></div>
+    <div style="margin-top:12px;font-size:12px;color:var(--txt-muted);line-height:1.55">
+      Treat this as a floor for crew/equipment planning — not a revenue forecast.
+      Actual revenue lags by the bid → award → invoice cycle (see velocity panel).
+    </div>`;
+}
+ 
+function renderVelocity(D){
+  const v = (typeof pipelineVelocity === 'function') ? pipelineVelocity(D) : null;
+  if (!v) {
+    el('velocityBlock').innerHTML = '<div class="empty">Not enough won-bid age data yet.</div>';
+    return;
+  }
+  el('velocityBlock').innerHTML = `
+    <div class="velocity-row">
+      <div class="velocity-cell"><div class="lbl">P25 (fast)</div><div class="val">${v.p25}</div><div class="unit">days</div></div>
+      <div class="velocity-cell"><div class="lbl">Median</div><div class="val" style="color:var(--yellow)">${v.medianDays}</div><div class="unit">days</div></div>
+      <div class="velocity-cell"><div class="lbl">P75 (slow)</div><div class="val">${v.p75}</div><div class="unit">days</div></div>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--txt-muted);text-align:right">sample: ${v.sample} won bids</div>`;
+}
+ 
+function renderFunnel(R){
+  const c = R.competitive;
+  el('funnelStats').innerHTML = `
+    <div class="metric-row"><div class="metric-label">Total competitive bids</div><div class="metric-value">${c.jobs.length}</div></div>
+    <div class="metric-row"><div class="metric-label">Decided (won + lost)</div><div class="metric-value">${c.decidedCount}</div></div>
+    <div class="metric-row"><div class="metric-label">Wins</div><div class="metric-value" style="color:var(--green)">${c.wins}</div></div>
+    <div class="metric-row"><div class="metric-label">Losses</div><div class="metric-value" style="color:var(--red)">${c.losses}</div></div>
+    <div class="metric-row"><div class="metric-label">Pending</div><div class="metric-value" style="color:var(--yellow)">${c.pending}</div></div>
+    <div class="metric-row"><div class="metric-label">Bid-count win rate</div><div class="metric-value">${fmtPct(c.winRate)}</div></div>
+    <div class="metric-row"><div class="metric-label">$-weighted win rate</div><div class="metric-value">${fmtPct(c.dollarWinRate)}</div></div>`;
+}
+ 
+function renderCVChart(R){
+  const c = R.competitive;
+  const ctx = document.getElementById('cvChart')?.getContext('2d');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Won', 'Lost', 'Pending'],
+      datasets: [{
+        data: [c.wonCV || 0, c.lostCV || 0, c.pendingCV || 0],
+        backgroundColor: ['rgba(62,207,142,.75)', 'rgba(224,82,82,.65)', 'rgba(245,200,66,.85)'],
+        borderColor: ['#3ecf8e', '#e05252', '#f5c842'],
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => fmt$(ctx.parsed.y) } },
+      },
+      scales: {
+        x: { ticks: { color: '#8a90a0' }, grid: { display: false } },
+        y: { ticks: { color: '#8a90a0', callback: v => fmt$(v) }, grid: { color: '#252a38' } },
+      },
+    },
+  });
+}
+ 
+function renderGCTable(R){
+  const rows = R.byGC || [];
+  if (!rows.length) { el('gcTable').innerHTML = '<tr><td class="empty" colspan="7">No GC data yet.</td></tr>'; return; }
+  let html = `<thead><tr>
+    <th>GC</th><th class="num">Bids</th><th class="num">Won</th><th class="num">Lost</th>
+    <th class="num">Pending</th><th class="num">Pending $</th><th class="num">Total CV bid</th>
+  </tr></thead><tbody>`;
+  rows.slice(0, 30).forEach(g => {
+    html += `<tr>
+      <td>${g.gc}</td>
+      <td class="num">${g.bids}</td>
+      <td class="num" style="color:var(--green)">${g.wins}</td>
+      <td class="num" style="color:var(--red)">${g.losses}</td>
+      <td class="num" style="color:var(--yellow)">${g.pending}</td>
+      <td class="num">${fmt$(g.pendingCV)}</td>
+      <td class="num">${fmt$(g.totalCV)}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  el('gcTable').innerHTML = html;
+}
+ 
+function renderLeadTable(R){
+  const rows = R.byLead || [];
+  if (!rows.length) { el('leadTable').innerHTML = '<tr><td class="empty" colspan="6">No lead data yet.</td></tr>'; return; }
+  let html = `<thead><tr>
+    <th>Sales lead</th><th class="num">Bids</th><th class="num">Wins</th><th class="num">Losses</th>
+    <th class="num">Pending</th><th class="num">Won $</th>
+  </tr></thead><tbody>`;
+  rows.forEach(l => {
+    html += `<tr>
+      <td>${l.lead}</td>
+      <td class="num">${l.bids}</td>
+      <td class="num" style="color:var(--green)">${l.wins}</td>
+      <td class="num" style="color:var(--red)">${l.losses}</td>
+      <td class="num" style="color:var(--yellow)">${l.pending}</td>
+      <td class="num">${fmt$(l.wonCV)}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  el('leadTable').innerHTML = html;
+}
+ 
+function renderQuality(R){
+  el('staleCount').textContent = R.competitive.reclassifiedStale ?? 0;
+  el('unbilledCount').textContent = R.competitive.reclassifiedUnbilled ?? 0;
+  el('multiGCCount').textContent = R.multiGC.bidsInMultiGCProjects ?? 0;
+  el('multiGCProjects').textContent = R.multiGC.projectCount ?? 0;
+}
+ 
+function renderRelationship(R){
+  const rel = R.relationship || { bids: 0, wonCount: 0, wonCV: 0 };
+  el('relBlock').innerHTML = `
+    <div class="metric-row"><div class="metric-label">Relationship-channel jobs</div><div class="metric-value">${rel.bids}</div></div>
+    <div class="metric-row"><div class="metric-label">Won (active or closed-with-revenue)</div><div class="metric-value" style="color:var(--green)">${rel.wonCount}</div></div>
+    <div class="metric-row"><div class="metric-label">Relationship-won contract value</div><div class="metric-value">${fmt$(rel.wonCV)}</div></div>
+    <div style="margin-top:10px;font-size:12px;color:var(--txt-muted);line-height:1.55">
+      Direct/repeat customer work where there's no real "win/loss" because there isn't a competitive bidding event. Tracked separately so it doesn't distort competitive win-rate.
+    </div>`;
+}
+ 
+function render(D){
+  const k = D?.['knowify-jobs'];
+  if (!k?.jobs) {
+    document.querySelector('.main').insertAdjacentHTML('afterbegin',
+      '<div class="page-note" style="border-color:var(--red)">No Knowify pipeline data loaded yet. Upload via the admin page.</div>');
+    return;
+  }
+  const R = applyKnowifyRules(k.jobs);
+  renderKPIs(R);
+  renderForecast(R);
+  renderVelocity(D);
+  renderFunnel(R);
+  renderCVChart(R);
+  renderGCTable(R);
+  renderLeadTable(R);
+  renderQuality(R);
+  renderRelationship(R);
+}
+ 
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof renderNav === 'function') renderNav('pipeline');
+  if (typeof loadDashboard === 'function') {
+    loadDashboard(D => { try { render(D); } catch(e){ console.error(e); } });
+  }
+});
 </script>
 </body>
 </html>
