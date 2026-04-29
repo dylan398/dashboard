@@ -307,7 +307,11 @@ function applyKnowifyRules(rawJobs, opts = {}) {
   // Per-GC breakdown
   const byGC = {};
   competitive.forEach(j => {
-    const gc = (j.client || '').trim() || '— Unknown —';
+    // Canonicalize the client name so known aliases (e.g. "JPI" + "JPI Companies")
+    // merge into a single byGC row. Falls through to the raw name if the
+    // alias map isn't loaded.
+    const rawGc = (j.client || '').trim() || '— Unknown —';
+    const gc = (typeof canonicalGCName === 'function') ? canonicalGCName(rawGc) : rawGc;
     if (!byGC[gc]) byGC[gc] = { gc, bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0 };
     byGC[gc].bids++;
     if (j.outcome === 'win')      { byGC[gc].wins++; byGC[gc].wonCV += j.contractTotal || 0; }
@@ -924,6 +928,181 @@ function pipelineVelocity(D) {
   const p25 = ages[Math.floor(ages.length * 0.25)];
   const p75 = ages[Math.floor(ages.length * 0.75)];
   return { medianDays: median, p25, p75, sample: ages.length };
+}
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════
+// SECTION 4c ─ GC SEGMENTATION (Group A / B / C — see CONTEXT.md §2.5)
+// ════════════════════════════════════════════════════════════════════════
+//
+// SFS_Outreach_Action_List.xlsx classifies GCs into descriptive groups:
+//   • Group A — derived live from Knowify (≥70% WR, ≥5 decided bids)
+//   • Group B — 26 GCs in core/gc-segmentation.js (active competitive)
+//   • Group C-STOP — chain-locked-pattern GCs (~22 GCs; PlanHub EXCLUDED)
+//   • Group C-PUB — public-sector zero-win (25 GCs)
+//   • Group C-MIX — mixed-commercial zero-win (103 GCs)
+//   • DATA-ARTIFACT — PlanHub. Won bids get renamed to the real GC after
+//     award; the apparent 0% WR is not a real signal. Don't aggregate.
+//
+// IMPORTANT — these are *descriptive* groupings. The pricing-analysis
+// recommendations attached to each group (dinner with these, stop those)
+// are analyst suggestions, not auto-actions. The dashboard does NOT
+// generate "stop bidding GC X" or "save Y hours/year" insights. It just
+// shows the segmentation as context.
+//
+// The classification table is loaded from core/gc-segmentation.js into
+// window.GC_CLASSIFICATION. classifyGCByOutreach() looks up a GC name
+// against that table. Group A is computed at runtime from byGC stats,
+// not hardcoded — it stays current as bid history accumulates.
+ 
+/**
+ * Classify a GC name against the static outreach-list groups + the
+ * dynamic Group A derivation (from current Knowify byGC stats).
+ *
+ * Returns: { name, group, source, raw, count } where:
+ *   group ∈ {'A','B','C-STOP','C-PUB','C-MIX','CHAIN','UNCLASSIFIED'}
+ *   source = 'live-A' (computed) | 'segmentation-list' | 'unknown'
+ */
+function classifyGCByOutreach(gcName, byGC) {
+  if (!gcName) return { name: gcName, group: 'UNCLASSIFIED', source: 'unknown' };
+  // 1. Try the static list first (window.GC_CLASSIFICATION from gc-segmentation.js)
+  const fromList = (typeof classifyGC === 'function') ? classifyGC(gcName) : null;
+  // 2. Compute live Group A independently from Knowify
+  const norm = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  let liveA = null;
+  if (Array.isArray(byGC)) {
+    const target = norm(gcName);
+    const match = byGC.find(g => norm(g.gc) === target);
+    if (match) {
+      const decided = (match.wins || 0) + (match.losses || 0);
+      const wr = decided ? (match.wins / decided * 100) : null;
+      // Group A threshold per CONTEXT.md §2.5 — ≥70% WR over ≥5 decided.
+      if (decided >= 5 && wr != null && wr >= 70) {
+        liveA = { wr: +wr.toFixed(1), bids: match.bids, wins: match.wins, decided };
+      }
+    }
+  }
+  // Group A overrides static classification IF it would have been C-MIX (zero-win
+  // categories should never override this — only "no win history" cases).
+  // In practice the static list never assigns Group A, so this is purely additive.
+  if (liveA) {
+    return { name: gcName, group: 'A', source: 'live-A', meta: liveA, raw: fromList?.raw || gcName };
+  }
+  if (fromList) {
+    return { name: gcName, group: fromList.group, source: 'segmentation-list', raw: fromList.raw, count: fromList.count };
+  }
+  return { name: gcName, group: 'UNCLASSIFIED', source: 'unknown', raw: gcName };
+}
+ 
+/**
+ * Pipeline by outreach group — for the *live* pending bids in Knowify,
+ * how does pending value distribute across A / B / C-STOP / C-PUB /
+ * C-MIX / UNCLASSIFIED?
+ *
+ * Output:
+ *   {
+ *     groups: { A: {gcs, bids, pendingCV, wonCV}, B: {…}, … },
+ *     unclassifiedCount, unclassifiedGCs[],
+ *   }
+ */
+function pipelineByGroup(D) {
+  const k = D?.['knowify-jobs'];
+  if (!k?.jobs) return null;
+  const R = applyKnowifyRules(k.jobs);
+  const out = {
+    A:           { label: 'Group A — Maintain',        gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+    B:           { label: 'Group B — Dinner targets',  gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+   'C-STOP':     { label: 'C — Stop bidding',           gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+   'C-PUB':      { label: 'C — Cert-check (pub-sector)',gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+   'C-MIX':      { label: 'C — Post-loss call needed',  gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+    CHAIN:       { label: 'Chain-builder GC',           gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+    UNCLASSIFIED:{ label: 'Unclassified',               gcs: [], bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0 },
+  };
+  R.byGC.forEach(g => {
+    const c = classifyGCByOutreach(g.gc, R.byGC);
+    const bucket = out[c.group] || out.UNCLASSIFIED;
+    bucket.gcs.push({ gc: g.gc, group: c.group, bids: g.bids, wins: g.wins, losses: g.losses, pending: g.pending, pendingCV: g.pendingCV, wonCV: g.wonCV, lostCV: g.lostCV, totalCV: g.totalCV });
+    bucket.bids      += g.bids || 0;
+    bucket.pending   += g.pending || 0;
+    bucket.pendingCV += g.pendingCV || 0;
+    bucket.wonCV     += g.wonCV || 0;
+    bucket.lostCV    += g.lostCV || 0;
+  });
+  // Sort each bucket by total CV bid (descending — biggest exposures first)
+  Object.values(out).forEach(b => b.gcs.sort((a, c) => c.totalCV - a.totalCV));
+  return out;
+}
+ 
+/**
+ * Bid-volume distribution by group — purely descriptive. Tells you how
+ * many bids and how much pending CV currently sit in each segmentation
+ * bucket. No recommendations attached. (Per CONTEXT.md §2.5: groupings
+ * are descriptive context, not auto-actions.)
+ *
+ * Output: { groups: { groupKey: { gcCount, bids, pending, pendingCV,
+ *                                  wonCV, lostCV, sampleGCs } } }
+ */
+function bidDistributionByGroup(D) {
+  const k = D?.['knowify-jobs'];
+  if (!k?.jobs) return null;
+  const R = applyKnowifyRules(k.jobs);
+  const out = {
+    A:             { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+    B:             { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+   'C-STOP':       { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+   'C-PUB':        { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+   'C-MIX':        { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+    CHAIN:         { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+   'DATA-ARTIFACT':{ gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+    UNCLASSIFIED:  { gcCount: 0, bids: 0, pending: 0, pendingCV: 0, wonCV: 0, lostCV: 0, sampleGCs: [] },
+  };
+  R.byGC.forEach(g => {
+    const c = classifyGCByOutreach(g.gc, R.byGC);
+    const bucket = out[c.group] || out.UNCLASSIFIED;
+    bucket.gcCount   += 1;
+    bucket.bids      += g.bids || 0;
+    bucket.pending   += g.pending || 0;
+    bucket.pendingCV += g.pendingCV || 0;
+    bucket.wonCV     += g.wonCV || 0;
+    bucket.lostCV    += g.lostCV || 0;
+    bucket.sampleGCs.push({ gc: g.gc, bids: g.bids, wins: g.wins, losses: g.losses, pending: g.pending, pendingCV: g.pendingCV, wonCV: g.wonCV, lostCV: g.lostCV, totalCV: g.totalCV });
+  });
+  Object.values(out).forEach(b => b.sampleGCs.sort((a, c) => c.totalCV - a.totalCV));
+  return out;
+}
+ 
+/**
+ * Group B follow-up candidates — recent (last 90 days) competitive
+ * losses on Group B GCs. These are the specific lost bids Dylan would
+ * reference in dinner conversations: "We bid X in March — who got it?"
+ *
+ * Output: array of { gc, jobName, contractValue, ageDays, group:'B' }
+ * sorted by recency.
+ */
+function groupBRecentLosses(D, days = 90) {
+  const k = D?.['knowify-jobs'];
+  if (!k?.jobs) return null;
+  const R = applyKnowifyRules(k.jobs);
+  const cutoffMs = days * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const out = [];
+  // Canonicalize the per-job client name once so aliases (e.g. "JPI" →
+  // "JPI Companies") resolve correctly against the static segmentation map.
+  const canon = (n) => (typeof canonicalGCName === 'function') ? canonicalGCName(n) : n;
+  R.competitive.jobs.forEach(j => {
+    if (j.outcome !== 'loss') return;
+    const canonClient = canon(j.client);
+    const c = classifyGCByOutreach(canonClient, R.byGC);
+    if (c.group !== 'B') return;
+    if (j.ageDays != null && j.ageDays * 24 * 60 * 60 * 1000 > cutoffMs) return;
+    out.push({
+      gc: canonClient, jobName: j.name || j.jobName,
+      contractValue: j.contractTotal,
+      ageDays: j.ageDays, salesLead: j.salesLead,
+    });
+  });
+  out.sort((a, b) => (a.ageDays || 9999) - (b.ageDays || 9999));
+  return out;
 }
  
  
