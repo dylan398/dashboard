@@ -1,13 +1,11 @@
 SFS Dashboard — Context for Future Claude Chats
-
 Read this file first. Every metric and threshold in this dashboard
 sits on top of business and industry context that changes how the
 numbers should be interpreted. A Claude chat that reasons about the
 data without this context will get things confidently wrong — flagging
 healthy patterns as alarms, and dismissing real problems as normal.
 
-
-1. Who Semper Fi Striping LLC Is
+Who Semper Fi Striping LLC Is
 The business in one paragraph. Pavement marking and striping subcontractor
 serving the Dallas–Fort Worth metroplex out of Haslet, TX (with roots and a
 shop in the Tolar/Stephenville area). Founded in 2014 by Tyler Petty (COO)
@@ -23,7 +21,6 @@ Hot-tape products
 ADA blue blocks, fire lanes, load zones, stencils
 Reflective markings, traffic paint
 Sealcoating (smaller share, often bundled with striping)
-
 Customer model: ~95% subcontractor work for general contractors
 (GCs) on commercial pavement projects (new construction parking lots,
 warehouses, retail, schools, distribution centers, etc.). Some direct work
@@ -41,7 +38,7 @@ Headcount (inferable from P&L): based on Wages(COGS) + Salaries lines,
 roughly 8-15 field crew members + small admin/sales team. Not a 50-person
 shop.
 
-2. Industry Reality That Overrides "Best Practices"
+Industry Reality That Overrides "Best Practices"
 These are the rules Claude needs to follow when interpreting metrics for
 this specific business.
 2.1 "Past due" is meaningless in TX subcontracting
@@ -65,7 +62,6 @@ Therefore: the "daysPastDue" field in our open-invoice data is
 really "days since invoice sent." It's a measure of how long
 customers take to pay, not how late they are. Aging buckets are
 informational, not alarms. Do not treat them as collections crises.
-
 Industry DSO benchmarks (median, not aspirational):
 SegmentTypical DSOConstruction overall60–90 daysEngineering & construction~100 daysHVAC / mechanical35–55 daysPlumbing30–50 daysElectrical40–60 daysPavement marking (SFS)~50–75 days normal, 90+ for slow GCs
 A SFS DSO under 60 is excellent. 60–80 is normal. 80–100 means a
@@ -75,7 +71,6 @@ catching fire — it's a known slow GC.
 2.2 The Knowify data is dirty
 SFS doesn't use Knowify the way the software vendor designed it.
 Specifically:
-
 Stale bids stay open in "Bidding" status indefinitely. Awards
 actually happen in 30–60 days. Anything still bidding after 120 days
 is realistically a loss. The dashboard reclassifies these → loss.
@@ -85,7 +80,6 @@ shifted, was cancelled, or fell through. Our reclassifier flips these → loss.
 Sales Lead is used inconsistently. Three values are
 "relationship-channel" (pre-sold work where outcome is determined by
 trust/relationship, not price competitiveness):
-
 James Thetford (CRO)
 Tyler Petty (COO)
 Jenna Napier (relationship manager)
@@ -93,8 +87,6 @@ Jenna Napier (relationship manager)
 adding to the relationship-leads list. He's the CEO, not a salesperson.)
 Bids led by these names are excluded from win-rate calculations
 because their outcomes don't reflect price competitiveness.
-
-
 The competitive set is everything else: Estimating Department,
 blank Sales Lead, all Rejected jobs. Win-rate metrics are computed
 only on this set.
@@ -105,13 +97,11 @@ the GC just didn't win. Per-GC-bid is the right unit for measuring
 "which GCs to pursue," but loss counts are inflated by multi-GC
 duplication. Our dashboard annotates this; don't try to deduplicate
 the underlying bids.
-
 The single source of truth for these rules is applyKnowifyRules() in
 core/dash.js. Don't re-implement them in report pages.
 2.3 Margins for parking-lot striping are tighter than they look
 Industry sources sometimes cite "90% gross margin" for striping, but those
 numbers are misleading for SFS-style commercial work:
-
 Reality at the SFS scale: gross margin 30–45% on commercial
 parking-lot work, 20–30% on TxDOT-style highway thermoplastic, and
 40–55% on small private restripe jobs. The 90% number applies only
@@ -123,16 +113,12 @@ materially as a share of revenue YoY.
 Bid math: typical add for overhead + profit on a competitive
 commercial bid is 30-40% on top of estimated cost. Less than that
 margin means SFS is buying market share, not generating profit.
-
 2.4 Strong seasonality — and Texas's mitigated version of it
 Pavement marking requires:
-
 Air + ground temperature ≥ 45°F (some paints want 50°F)
 Humidity < 50%
 No precipitation forecast for several hours
-
 In DFW:
-
 Peak season: April–November. The bulk of revenue books in
 June–October.
 Shoulder: March + late November/early December. Workable days
@@ -141,14 +127,12 @@ Slow: December, January, February. Some thermoplastic work is
 still possible (it tolerates colder cure temps), but most lots wait.
 Off-season billings often spike anyway because GCs catch up paying
 for the previous fall's work.
-
 For dashboard interpretation: Q1 revenue should be expected to be
 the smallest quarter, Q3 the biggest. A "down" January isn't a problem;
 a down July would be.
 Partial-year (YTD) handling — strict rule for all reports. Because
 of this seasonality, any comparison of a partial year against a full
 year is wrong. Specifically:
-
 Never band a partial-year ratio (GM%, NM%, OpEx-as-%-of-revenue,
 revenue-per-labor-$, DSCR) against industry medians. Those medians
 assume a full-year denominator.
@@ -170,7 +154,6 @@ to the prior-year same-N-months slice as a "where we are right
 now" panel, with the explicit caveat that partial-year ratios
 aren't graded against full-year medians. The Insights and PL pages
 use this pattern.
-
 If a future Claude is tempted to add a "2026 net margin is 1.4% —
 below industry median" alarm, that's the bug. Check _yearStatus()
 first.
@@ -211,7 +194,6 @@ provides. The segmentation is a starting point, not a directive.
 Estimating-effort facts (for record-keeping, not for auto-insights).
 If anyone ever wants to compute "estimating hours by group," the
 inputs are:
-
 ~1.5 hrs per estimate is the typical cost (varies with size /
 complexity).
 Multi-GC bids share a single estimate. When the same project is
@@ -222,14 +204,12 @@ duplicates.
 PlanHub is a data artifact. Its bid count over-states real
 submissions and its 0% win rate is a Knowify renaming artifact, not
 a real outcome. Don't include it in any effort calculation.
-
 The dashboard intentionally does NOT auto-generate "redirect X
 hours/year" recommendations from these numbers. They're documented
 here in case Dylan or a future Claude wants to do the math
 deliberately.
 2.6 SDVOSB / Veteran-Owned Business reality
 SFS holds SDVOSB certification. This means:
-
 Federal goal: the federal government targets 5% of all contracting
 dollars to SDVOSBs (recently raised from 3%). VA targets 7%.
 Sole-source authority: federal contracting officers can award
@@ -241,8 +221,7 @@ channel. The DBE (Disadvantaged Business Enterprise) angle on TxDOT
 primes is more immediate — primes need DBE/SDVOSB sub participation
 to win projects.
 
-
-3. Competitor Landscape (DFW Pavement Marking)
+Competitor Landscape (DFW Pavement Marking)
 The local market SFS competes in. Win-rate context: when SFS loses a
 bid, it's typically to one of these names.
 CompanyNotesGeneral Striping, LLCMajor DFW player. Broad services (markings + decorative coatings + concrete polish + signage). Larger, established.Advanced Texas StripingSanger, TX. Serves DFW + south OK. Pavement-maintenance generalist.Supreme Striping LLCDFW-focused. ADA + fire lane specialist. Direct competitor on commercial restripe.Proper Striping LLCPlano/Frisco/McKinney/Rockwall focus. Suburban commercial. Direct competitor.DFW Striping & Sealcoating(formerly Stripe-A-Lane). Sealcoating + striping bundled. Competes on price.Tiger StripesArlington base. Pressure washing + striping. Often mid-market.Linear Traffic MarkingsFounded 2017. Highway-grade markings. Competes on TxDOT-style work.Traffic Highway Maintenance (THM)Dallas, founded 2003. Highway maintenance + pavement marking. Competes on larger TxDOT subbing.Stripe Doctor / Yellowstone Concrete Striping / othersSmaller mom-and-pop competitors at the bottom of the market.
@@ -250,8 +229,7 @@ SFS's positioning: mid-market commercial subcontractor with
 above-average reputation (4.9⭐), veteran-owned story, and aggressive
 growth trajectory ($267K → $2.84M revenue 2020–2025 = 60% CAGR).
 Differentiates on speed and quality, not lowest price.
-
-4. Financial Benchmark Context
+Financial Benchmark Context
 When evaluating SFS metrics, here are the apples-to-apples industry
 norms for a sub-$50M-revenue commercial construction subcontractor:
 4.1 P&L ratios
@@ -263,7 +241,6 @@ growth. The "growing pains" framing is real but if it persists into
 2026 it's a margin discipline problem, not a scaling problem.
 2022's -10.4% net loss during early growth phase is forgivable as
 ramp investment; not a structural concern.
-
 4.2 Balance sheet ratios
 RatioHealthy benchmarkCrisis thresholdCurrent ratio1.5–2.0<1.0Quick ratio (~current here)1.4+<1.0Debt-to-equity<2.0>3.0 or negative equityWorking capital (positive)alwaysnegative is alarmWorking capital turnover6–10x>15 = needs more WC; <4 = overcapitalized
 Construction industry average current ratio: 1.5; for sub-$50M firms,
@@ -279,7 +256,7 @@ SFS likely qualifies — DSCR 2.33x (current calc), 11+ years in business,
 clean BBB record, growing revenue. The narrative will need to address
 the 2.17% 2025 net margin and rising cost ratios.
 
-5. Pricing & Cost Reality (for sanity-checking parser output)
+Pricing & Cost Reality (for sanity-checking parser output)
 To recognize obviously-wrong data:
 
 Striping per linear foot: $0.20–$0.75 typical, TX runs $0.30–0.50
@@ -287,13 +264,12 @@ Removal of old lines: adds $0.50–1.00/linear foot
 Standard 75-space retail lot restripe: $400–700 labor + $180–250 materials = ~$700-1,000 invoice
 A $66K invoice (EMJ Corporation 2026): that's a large new-construction lot or thermoplastic highway work, not a typical restripe
 Field tech wages: $18–25/hour in DFW (matches SFS 2025 wage breakdown)
-
 If a parsed P&L line shows revenue $260K with COGS $9.7K (the 2020
 figures), interpret as: small operation, owner+1 worker, mostly painting
 labor. That fits Tyler+James doing it themselves with a contractor or
 two.
 
-6. Knowify Data Quality Caveats (recap and detail)
+Knowify Data Quality Caveats (recap and detail)
 The Knowify export from SFS is messy. Specific issues to expect:
 
 "State" is often blank — defaulted to TX in our parser when missing
@@ -308,8 +284,7 @@ them as authoritative metrics.
 "Active" jobs with old start dates are sometimes complete but
 not yet moved to Closed status. We don't (yet) flag these.
 
-
-7. Data Quirks and Quality Notes
+Data Quirks and Quality Notes
 These are the "this is not a bug, this is the data" things to know:
 
 CF 2024 originally only ran Jan 1 - Dec 1, 2024. The Dec 1
@@ -334,8 +309,7 @@ forward, not all-time. To get full history, re-export from QBO with
 Data starts Jan 1, 2020. No Balance Sheet Jan 1, 2020 will ever
 exist (QuickBooks account didn't exist that day).
 
-
-8. The Dashboard's Architectural Rules
+The Dashboard's Architectural Rules
 8.0 The Actionability Rule (most important)
 Every auto-generated insight, alarm, and recommendation must be about
 something Dylan can actually do. The dashboard exists to inform
@@ -354,9 +328,7 @@ The dashboard surfaces the groupings; it does NOT generate
 recommendations like "stop bidding GC X" or "save Y hours/year."
 Treat the analyst-suggested actions with significantly less weight
 than the segmentation data itself.
-
 What SFS does NOT control (don't generate "do X" insights here):
-
 When customers pay — TX subs have no enforceable deadline. AR
 aging, DSO trends, "slow payer" callouts are informational only.
 Reports can show them descriptively but should not frame them as
@@ -373,21 +345,17 @@ customers is not.)
 Cash flow short-term — SBA loan is in progress. Don't harp on
 cash burn or runway. Show debt schedule and equity trajectory; let
 the upcoming loan show up in the financial statements when it lands.
-
 Test: before adding an insight, ask "what would Dylan do with this?"
 If the answer is "nothing — just be aware," it's a descriptive metric,
 not an insight. Put it in a report panel, not in generateInsights().
 8.1 Standing rules
-
 One source of truth per concept. Knowify rules in
 applyKnowifyRules(). Customer concentration in customerConcentration().
-Days to pay in daysToPayStats(). Don't re-implement.
-Days-to-pay framing, not past-due framing. Aging UI is
-informational time bands. Color coding can use orange for >120 days
-(informational), but copy should say "days out" not "days past due."
-Reserve red for situations that actually represent crisis (e.g.,
-negative working capital, DSCR <1.0, cash-on-hand vs liabilities
-mismatch).
+Days to pay in daysToPayStats(). DSO computation in
+computeDSOFromTransactions(). Collections forecast in
+forecastCollections(). Don't re-implement.
+Days-to-pay framing, not past-due framing for AR. AP is the exception
+(vendors have enforceable terms — see §2.1).
 Industry-aware thresholds. dash.js should encode the bands in
 §4 above, not arbitrary "60% top-5 = warning" guesses.
 Per-page detail, shared metrics. Reports only render. Compute in
@@ -395,9 +363,66 @@ dash.js. If a metric is needed in two reports, it lives in
 dash.js.
 Storage strategies are immutable. Don't change a dataset's
 strategy without a migration plan — it would orphan historical data.
+No alarm-coloring on cash, working capital, DSCR, or runway while
+the SBA loan is in progress (§8.0). Show the numbers; don't generate
+"fix this" insights. Revisit framing once the loan funds.
+Shared stylesheet only. All visual tokens, panels, KPIs, and tables
+live in core/styles.css. Per-page <style> blocks should be tiny and
+only for genuinely page-unique rules. Don't redefine :root per page.
+8.2 Partial-year (YTD) handling — strict rule for all reports
+Because of TX seasonality (§2.4), any comparison of a partial year against
+a full year is wrong. Specifically:
+Never band a partial-year ratio (GM%, NM%, OpEx-as-%-of-revenue,
+revenue-per-labor-$, DSCR) against full-year industry medians. Those
+medians assume a full-year denominator.
+Never compute YoY by comparing CY-YTD-through-N-months to PY full-year.
+Compare CY YTD to PY same N months. Helpers ytdVsPriorSamePeriod()
+and seasonalRevenueCompare() do this correctly.
+In charts spanning years, partial years can be plotted alongside
+complete years but must be visually demoted (greyed bars, dashed line
+segments, hollow markers, "(YTD through Apr)" axis label). They must
+not look like a peer of full-year points.
+For ratio-based insights (generateInsights margin / labor / OpEx
+checks), use _latestAnnualPL(D) (latest complete year only) and
+completeYears(D) (excludes any partial year).
+YTD context is still useful — show the current YTD slice next to PY
+same N months as a "where we are right now" panel, with explicit caveat
+that partial-year ratios aren't graded against full-year medians.
+If a future Claude is tempted to add a "2026 net margin is 1.4% — below
+industry median" alarm, that's the bug. Check _yearStatus() first.
+8.3 Architecture: where the auto-DSO / collections forecast lives
+The dashboard auto-computes per-client DSO from the QBO Transaction
+Detail Dylan is already uploading — no separate Excel needed.
+qbo-transactions parser (parsers/qbo-transactions.js): saves AR account
+items uncapped — every Invoice + Payment, with date, customer, type,
+amount.
+mergeTransactionData (core/firebase.js): dedupes items across uploads
+by date|type|name|amount key, preserving full AR history.
+computeDSOFromTransactions (core/dash.js): walks AR items, separates
+Invoice rows from Payment rows, FIFO-matches them per customer,
+produces per-client DSO statistics in the same shape as the static
+reference. Cached per qbo-transactions.meta.mergedAt so it invalidates
+on new upload.
+dsoForClient(D, name): resolution order is computed-from-transactions
+first, static fallback second. Static fallback (core/dso-reference.js)
+is the embedded April-2026 baseline (914 matched invoices, 429 clients,
+portfolio median 36.9 days).
+forecastCollections(D): for each currently-open invoice, estimates
+expected pay date using estimatePaymentDate (median DSO + portfolio
+prior for low-sample clients), buckets dollars into 0–30/31–60/61–90/
+91–120/120+ days from today, reports confidence breakdown
+(client-history / low-sample / portfolio-fallback).
+Important — no DSO alarms. Per §8.0, the dashboard does NOT generate
+"chase customer X" insights. The forecast is a planning input
+(crew capacity, expected cash inflows for SBA loan narrative) — not
+a collections to-do list. Dylan: "we can't control when ARs get paid."
+Important — Dylan does NOT manually upload a DSO Excel. The April-2026
+DSO file (Days to Pay by Company.xlsx) was the seed for the static
+fallback. From here on, DSO refreshes whenever Dylan uploads a fresh
+Transaction Detail. The qbo-dso-by-client parser file exists as
+deprecated code in parsers/ but is not loaded by admin.html.
 
-
-9. Quick Reference for Future Edits
+Quick Reference for Future Edits
 When a future Claude chat is asked to "improve the dashboard," check:
 
 Is this a real improvement or a misinterpretation of an alarm?
@@ -407,16 +432,12 @@ Is the new derived metric pure? Take normalized D, return number
 or null, never NaN. (See dash.js ADD-METRIC rules.)
 Have you read core/dash.js's top-of-file context block? It is
 the canonical short-form context. THIS file is the long-form.
-
 When asked to "interpret the dashboard for me":
-
 Use industry medians (§4) as the comparison, not generic benchmarks.
 Distinguish YTD-current-year from full-prior-year before quoting
 growth rates. The dashboard handles this in _latestAnnualPL().
 Flag the data-quality caveats (§7) when they affect the conclusion.
-
 When asked to "add a new report":
-
 Start by checking dash.js to see if the underlying metric exists.
 If yes, the new report is purely presentational. If no, add the
 metric to dash.js first with a JSDoc-style header explaining
@@ -425,8 +446,7 @@ Add the page to core/nav.js NAV_PAGES array.
 Match the existing report styles (CSS variables, Barlow Condensed
 for headings, JetBrains Mono for numbers).
 
-
-10. What's Still Missing / Future Data Adds
+What's Still Missing / Future Data Adds
 Things that would make this dashboard much sharper but require more data:
 
 Job-level profitability — Knowify has the fields but Dylan has
@@ -445,10 +465,7 @@ Project-level GP / margin tracking — once Knowify's profit fields
 are reliable.
 Backlog / scheduled-revenue forward calendar — what's on the
 schedule in the next 30/60/90 days, by GC.
-
-
 Sources used in compiling this document
-
 Semper Fi Striping company website + About page
 BBB / Birdeye / ZoomInfo public profiles for Tyler Petty, James Thetford
 Texas Prompt Payment Act analyses (Levelset, Haley & Olson, Porter Hedges)
@@ -462,10 +479,105 @@ CFMA 2022 Construction Financial Benchmarker
 Construction subcontractor financial-ratio benchmarks (Billd, Foundation Software, RSM US, FoundationSoft)
 Knowify product documentation
 Public Texas pavement marking cost guides
-
-
 This document is the SFS dashboard's shared mental model. Update it
 whenever you learn something material about the business or industry
 that future chats should know. Bias toward over-documentation —
 context that isn't here gets reinvented (badly) every time a fresh
 chat opens the repo.
+
+Changelog (recent rewrites — 2026-04-29)
+
+A full audit + sweep:
+Foundation
+core/styles.css extracted — all design tokens, panels, KPIs, tables,
+charts in one stylesheet. Page-specific <style> blocks now tiny.
+Cache busters bumped to ?v=11 across every page.
+Partial-year (YTD) handling
+Added _yearStatus, completeYears, yearStatusList, _latestAnnualPL
+(strict-complete), ytdVsPriorSamePeriod helpers.
+Fixed costProductivity, marginErosion, revenueGrowth, opexTrend to
+respect complete-year boundaries.
+Fixed labor-leverage insight bug (was comparing latest-complete to
+itself when partial year present in qbo-pl_all).
+All charts on pl.html, cash.html, customers.html, insights.html,
+index.html now flag partial years.
+Auto DSO / collections forecast
+qbo-transactions parser keeps AR detail uncapped. firebase.js
+mergeTransactionData dedupes AR items across uploads by
+date|type|name|amount. computeDSOFromTransactions does FIFO matching.
+forecastCollections produces per-bucket dollar amounts with confidence
+breakdown. customers.html surfaces the forecast; index.html shows
+expected ≤30d as a KPI.
+parsers/qbo-dso-by-client.js deprecated (not loaded by admin); the
+static core/dso-reference.js is the fallback baseline.
+Actionability rule enforcement
+index.html dropped customer-concentration alarm coloring.
+cash.html dropped alarm coloring on cash, working capital, equity,
+operating CF — page-level note explains the SBA-loan-pending framing.
+vendors.html softened past-due alarm coloring + added SBA-loan note.
+generateInsights ytd-pace insight uses monthly P&L (higher precision
+than the older sales-by-customer-based seasonal pace, which was
+dropped).
+Outreach segmentation
+core/gc-segmentation.js added (198 GCs from SFS_Outreach_Action_List
+
+alias map for "JPI" → "JPI Companies"). PlanHub flagged as
+DATA-ARTIFACT (won bids get renamed in Knowify post-award).
+applyKnowifyRules canonicalizes GC names before grouping so aliases
+merge. Outreach page is descriptive only; no auto-recommendations.
+
+Documentation
+docs/CONTEXT.md §2.5 (Group A/B/C framework + role split — owners
+to B, estimators to C), §8.0 actionability rule, §8.1 standing rules,
+§8.2 partial-year strict rule, §8.3 DSO architecture.
+Files in core/ at end of this rewrite:
+firebase.js, utils.js, gc-segmentation.js, dso-reference.js, dash.js,
+nav.js, styles.css.
+
+Changelog (recent rewrites — 2026-04-29)
+
+Foundation
+core/styles.css extracted — all design tokens, panels, KPIs, tables,
+charts in one stylesheet. Page-specific <style> blocks now tiny.
+Cache busters bumped to ?v=11 across every page.
+Partial-year (YTD) handling
+Added _yearStatus, completeYears, yearStatusList, _latestAnnualPL
+(strict-complete), ytdVsPriorSamePeriod helpers. Fixed costProductivity,
+marginErosion, revenueGrowth, opexTrend to respect complete-year
+boundaries. Fixed labor-leverage insight bug (was comparing
+latest-complete to itself when partial year present in qbo-pl_all).
+All charts on pl.html, cash.html, customers.html, insights.html,
+index.html now flag partial years (greyed bars / dashed segments /
+"(YTD …)" labels).
+Auto DSO / collections forecast
+qbo-transactions parser keeps AR detail uncapped. firebase.js
+mergeTransactionData dedupes AR items across uploads by
+date|type|name|amount. computeDSOFromTransactions does FIFO matching.
+forecastCollections produces per-bucket dollar amounts with confidence
+breakdown. customers.html surfaces the forecast; index.html shows
+expected ≤30d as a KPI. parsers/qbo-dso-by-client.js deprecated (not
+loaded by admin); the static core/dso-reference.js is the fallback.
+Actionability rule enforcement
+index.html dropped customer-concentration alarm coloring. cash.html
+dropped alarm coloring on cash, working capital, equity, operating CF
+— page-level note explains the SBA-loan-pending framing. vendors.html
+softened past-due alarm coloring + added SBA-loan note.
+generateInsights ytd-pace insight uses monthly P&L (replacing the
+older sales-by-customer-based seasonal pace).
+Outreach segmentation
+core/gc-segmentation.js (198 GCs from SFS_Outreach_Action_List.xlsx
+
+alias map e.g. "JPI" → "JPI Companies"). PlanHub flagged as
+DATA-ARTIFACT (won bids get renamed in Knowify post-award).
+applyKnowifyRules canonicalizes GC names before grouping so aliases
+merge. Outreach page is descriptive only; no auto-recommendations.
+Owner-level outreach is for Group B; estimator-level diagnostics
+for Group C subgroups.
+
+Documentation
+CONTEXT.md §2.5 (Group A/B/C framework + role split), §8.0
+actionability rule, §8.1 standing rules, §8.2 partial-year strict
+rule, §8.3 DSO architecture.
+Files in core/ at end of this rewrite:
+firebase.js, utils.js, gc-segmentation.js, dso-reference.js, dash.js,
+nav.js, styles.css.
