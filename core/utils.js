@@ -10,7 +10,18 @@ const fmtK = v => {
   return sign + '$' + abs.toFixed(0);
 };
 
-const fmtPct = (v, total) => total ? (v/total*100).toFixed(1)+'%' : '—';
+// Polymorphic %-formatter:
+//   fmtPct(value, total)  → ratio:  value/total × 100, formatted to 1dp.
+//   fmtPct(percent)       → format an already-computed percentage (e.g. 23.4 → "23.4%").
+// Both forms return '—' for null/non-finite. The 1-arg form lets pages like
+// pipeline.html / outreach.html drop their local fmtPct(n) helpers without
+// rewriting call sites — the 2-arg form keeps existing callers (viewer.html,
+// parsers/qbo-pl.js) unchanged.
+const fmtPct = (v, total) => {
+  if (v == null || !isFinite(v)) return '—';
+  if (total !== undefined) return total ? (v / total * 100).toFixed(1) + '%' : '—';
+  return v.toFixed(1) + '%';
+};
 
 const fmtNum = (v, d=0) => v == null ? '—' :
   v.toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d});

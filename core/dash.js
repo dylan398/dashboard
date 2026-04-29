@@ -725,21 +725,38 @@ function customerHealth(ledgerRow, totalLifetimeRevenue) {
 }
  
 /**
- * Pipeline → expected revenue projection. Multiplies pending bid value
- * by historical win rate to estimate "likely revenue we'll book" from
- * what's currently bidding. Doesn't account for time-to-revenue yet —
- * call it a leading indicator, not a forecast.
+ * Pipeline → expected revenue projection.
+ *
+ * CONTEXT.md §2.5 architectural rule: PER-GROUP win rates, not a single
+ * blended rate. $1 of Group A pending shouldn't be valued the same as $1
+ * of Group C pending. So this prefers `pipelineExpectedByGroup()` for
+ * the headline expectedWinValue, falling back to the blended rate only
+ * when group classification can't run.
+ *
+ * `historicalRate` (blended) and `weightedRate` (per-group blended) are
+ * both exposed — they should match for a healthy mix; a divergence is
+ * itself informative.
  */
 function pipelineProjection(D) {
   const knowify = D['knowify-jobs'];
   if (!knowify?.jobs) return null;
   const r = applyKnowifyRules(knowify.jobs);
   if (r.competitive.dollarWinRate == null) return null;
+
+  const byGroup = (typeof pipelineExpectedByGroup === 'function') ? pipelineExpectedByGroup(D) : null;
+  const usePerGroup = byGroup && byGroup.totalExpected != null;
+  const expectedWinValue = usePerGroup
+    ? +byGroup.totalExpected.toFixed(2)
+    : +(r.competitive.pendingCV * r.competitive.dollarWinRate / 100).toFixed(2);
+
   return {
-    pendingValue:   r.competitive.pendingCV,
-    historicalRate: r.competitive.dollarWinRate,
-    expectedWinValue: +(r.competitive.pendingCV * r.competitive.dollarWinRate / 100).toFixed(2),
-    pendingBids:    r.competitive.pending,
+    pendingValue:    r.competitive.pendingCV,
+    historicalRate:  r.competitive.dollarWinRate,                     // blended (won$ / decided$)
+    weightedRate:    usePerGroup ? byGroup.weightedWinRate : r.competitive.dollarWinRate,
+    expectedWinValue,
+    pendingBids:     r.competitive.pending,
+    rateSource:      usePerGroup ? 'per-group' : 'blended-fallback',
+    groupBreakdown:  usePerGroup ? byGroup.groups : null,
   };
 }
  
@@ -1338,10 +1355,13 @@ function generateInsights(D) {
   // ── 6. Pipeline forecast (forward visibility — operational) ──────
   const proj = pipelineProjection(D);
   if (proj) {
+    const rateLabel = proj.rateSource === 'per-group'
+      ? `${proj.weightedRate}% weighted $-win rate (per-group A/B/C, not blended)`
+      : `${proj.historicalRate}% blended $-win rate`;
     out.push({
       id: 'pipeline-forecast', category: 'pipeline', severity: 'info',
       title: 'Forward booking floor from current pipeline',
-      message: `${fmt(proj.pendingValue)} in pending bids × ${proj.historicalRate}% historical $ win rate = ${fmt(proj.expectedWinValue)} expected wins.`,
+      message: `${fmt(proj.pendingValue)} in pending bids × ${rateLabel} = ${fmt(proj.expectedWinValue)} expected wins.`,
       value: fmt(proj.expectedWinValue),
       recommendation: 'Use as a planning floor for crew/equipment commitments over the next ~60-90 days.',
     });
@@ -2560,12 +2580,36 @@ function pipelineRevenueSchedule(D, monthsAhead) {
   };
 }
 
+/**
+ * Forward-bid-arrival rate. Walks competitive Knowify jobs from the last
+ * LOOKBACK_BID_MONTHS, computes average bids/month and average bid CV.
+ * Used by _forecastPLRange to fill projection months past where current
+ * pending bids are scheduled to land — i.e., new bids that haven't
+ * arrived yet but historically would.
+ *
+ * Per-group rates would be ideal but we don't know which group FUTURE
+ * bids will come from; the historical blended $-win rate is a fair-mix
+ * proxy. _forecastPLRange caps arrival revenue at the seasonal baseline
+ * so this can't over-project.
+ */
+/**
+ * Forward-bid-arrival rate. Walks competitive Knowify jobs from the last
+ * LOOKBACK_BID_MONTHS, computes average bids/month and average bid CV.
+ * Used by _forecastPLRange to fill projection months past where current
+ * pending bids are scheduled to land — i.e., new bids that haven't
+ * arrived yet but historically would.
+ *
+ * Per-group rates would be ideal but we don't know which group FUTURE
+ * bids will come from; the historical blended $-win rate is a fair-mix
+ * proxy. _forecastPLRange caps arrival revenue at the seasonal baseline
+ * so this can't over-project.
+ */
 function bidArrivalRate(D) {
   const knowify = D && D['knowify-jobs'];
   if (!knowify || !knowify.jobs) return null;
   const R = applyKnowifyRules(knowify.jobs);
-  const groups = (typeof groupWinRates === 'function') ? groupWinRates(D) : null;
-  if (!groups) return null;
+
+  // Window: last LOOKBACK_BID_MONTHS of created competitive bids.
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - LOOKBACK_BID_MONTHS);
   const recent = R.competitive.jobs.filter(function(j) {
@@ -2574,17 +2618,25 @@ function bidArrivalRate(D) {
     return !isNaN(d) && d >= cutoff;
   });
   if (!recent.length) return null;
+
   const bidsPerMonth = recent.length / LOOKBACK_BID_MONTHS;
   const totalCV = recent.reduce(function(s, j) { return s + (+j.contractTotal || 0); }, 0);
   const avgBidCV = recent.length ? totalCV / recent.length : 0;
-  const blendedWR = R.competitive.dollarWinRate || 0;
-  const expectedRevenuePerMonth = bidsPerMonth * avgBidCV * (blendedWR / 100);
+
+  const blendedWinRate = (R.competitive && R.competitive.dollarWinRate != null)
+    ? R.competitive.dollarWinRate
+    : null;
+  if (blendedWinRate == null) return null;
+
+  const expectedRevenuePerMonth = +(bidsPerMonth * (blendedWinRate / 100) * avgBidCV).toFixed(2);
+
   return {
-    bidsPerMonth: +bidsPerMonth.toFixed(1),
+    lookbackMonths: LOOKBACK_BID_MONTHS,
+    bidsInLookback: recent.length,
+    bidsPerMonth: +bidsPerMonth.toFixed(2),
     avgBidCV: +avgBidCV.toFixed(2),
-    expectedRevenuePerMonth: +expectedRevenuePerMonth.toFixed(2),
-    blendedWinRate: blendedWR,
-    sampleMonths: LOOKBACK_BID_MONTHS,
-    sampleBids: recent.length,
+    blendedWinRate,
+    expectedRevenuePerMonth,
+    note: 'Forward-arrival projection: bids/month × blended $-win rate × avg CV. Capped at seasonal baseline by _forecastPLRange to prevent over-projection.',
   };
 }

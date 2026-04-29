@@ -8,19 +8,19 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="core/firebase.js"></script>
-<script src="core/utils.js"></script>
-<script src="core/nav.js"></script>
-<script src="parsers/qbo-pl.js"></script>
-<script src="parsers/qbo-bs.js"></script>
-<script src="parsers/qbo-cf.js"></script>
-<script src="parsers/qbo-sales.js"></script>
-<script src="parsers/qbo-transactions.js"></script>
-<script src="parsers/knowify-jobs.js"></script>
-<script src="parsers/qbo-ar-aging.js"></script>
-<script src="parsers/qbo-ap-aging.js"></script>
-<script src="parsers/qbo-open-invoices.js"></script>
-<script src="parsers/qbo-pl-monthly.js"></script>
+<script src="core/firebase.js?v=18"></script>
+<script src="core/utils.js?v=18"></script>
+<script src="core/nav.js?v=18"></script>
+<script src="parsers/qbo-pl.js?v=18"></script>
+<script src="parsers/qbo-bs.js?v=18"></script>
+<script src="parsers/qbo-cf.js?v=18"></script>
+<script src="parsers/qbo-sales.js?v=18"></script>
+<script src="parsers/qbo-transactions.js?v=18"></script>
+<script src="parsers/knowify-jobs.js?v=18"></script>
+<script src="parsers/qbo-ar-aging.js?v=18"></script>
+<script src="parsers/qbo-ap-aging.js?v=18"></script>
+<script src="parsers/qbo-open-invoices.js?v=18"></script>
+<script src="parsers/qbo-pl-monthly.js?v=18"></script>
 <style>
 :root {
   --bg-base:#0d0f14; --bg-panel:#13161e; --bg-card:#191d28; --bg-hover:#1e2330;
@@ -962,6 +962,11 @@ function renderStatusPanel(manifest) {
 async function refreshStatusPanel() {
   const manifest = await DB.readManifest();
   firebaseManifest = manifest || {};
+  renderStatusPanel(firebaseManifest);
+}
+</script>
+</body>
+</html>
   renderStatusPanel(firebaseManifest);
 }
 </script>

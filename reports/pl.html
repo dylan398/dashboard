@@ -19,16 +19,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFS — Revenue & Profit</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../core/styles.css?v=17">
+<link rel="stylesheet" href="../core/styles.css?v=18">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=17"></script>
-<script src="../core/utils.js?v=17"></script>
-<script src="../core/gc-segmentation.js?v=17"></script>
-<script src="../core/dso-reference.js?v=17"></script>
-<script src="../core/dash.js?v=17"></script>
-<script src="../core/nav.js?v=17"></script>
+<script src="../core/firebase.js?v=18"></script>
+<script src="../core/utils.js?v=18"></script>
+<script src="../core/gc-segmentation.js?v=18"></script>
+<script src="../core/dso-reference.js?v=18"></script>
+<script src="../core/dash.js?v=18"></script>
+<script src="../core/nav.js?v=18"></script>
 </head>
 <body>
 <main class="main">
@@ -319,5 +319,173 @@ function renderLabor(D) {
   });
   const ctx = document.getElementById('chart-labor');
   if (charts.labor) charts.labor.destroy();
+  // Bars: complete years coloured, current YTD greyed.
   const barFill = (s) => s.isComplete
-    ? ((s.revPerLa
+    ? CHART_COLORS.yellow + 'cc'
+    : 'rgba(138,144,160,.3)';
+  const barBorder = (s) => s.isComplete
+    ? CHART_COLORS.yellow
+    : '#8a90a0';
+  charts.labor = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: series.map(s => s.year + (s.isComplete ? '' : ` (YTD ${s.monthName})`)),
+      datasets: [{
+        label: 'Revenue per labor $',
+        data: series.map(s => s.revPerLabor),
+        backgroundColor: series.map(barFill),
+        borderColor: series.map(barBorder),
+        borderWidth: 1,
+      }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => '$' + (c.parsed.y || 0).toFixed(2) + ' revenue per $1 of labor' } } },
+      scales: { y: { ticks: { callback: v => '$' + (+v).toFixed(2) } } } },
+  });
+
+  // Labor-mix panel — last complete year only (CONTEXT.md §2.4).
+  const lastComplete = [...series].reverse().find(s => s.isComplete);
+  const mixEl = document.getElementById('labor-mix');
+  const periodEl = document.getElementById('labor-period');
+  if (mixEl && lastComplete) {
+    if (periodEl) periodEl.textContent = String(lastComplete.year);
+    mixEl.innerHTML = `
+      <div class="metric-row"><div class="metric-label">Total revenue</div><div class="metric-value">${fmt(lastComplete.revenue)}</div></div>
+      <div class="metric-row"><div class="metric-label">Wages (in COGS)</div><div class="metric-value">${fmt(lastComplete.wagesCogs)}</div></div>
+      <div class="metric-row"><div class="metric-label">Salaries (in OpEx)</div><div class="metric-value">${fmt(lastComplete.salariesOpex)}</div></div>
+      <div class="metric-row"><div class="metric-label">Total labor</div><div class="metric-value" style="color:var(--yellow)">${fmt(lastComplete.labor)}</div></div>
+      <div class="metric-row"><div class="metric-label">Revenue per labor $</div><div class="metric-value">$${lastComplete.revPerLabor != null ? lastComplete.revPerLabor : '—'}</div></div>
+      <div class="metric-row"><div class="metric-label">Labor as % of revenue</div><div class="metric-value">${lastComplete.revenue ? (lastComplete.labor / lastComplete.revenue * 100).toFixed(1) + '%' : '—'}</div></div>`;
+  } else if (mixEl) {
+    mixEl.innerHTML = '<div class="empty">Need at least one complete year for the labor-mix snapshot.</div>';
+  }
+}
+
+// ── Year picker — buttons for each year of available P&L data.
+// Clicking a year re-renders the income-statement table + OpEx chart.
+function renderYearPicker(D) {
+  const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];
+  const pickEl = document.getElementById('year-pick');
+  if (!pickEl) return;
+  // Latest year first; mark partial as "YTD".
+  const ordered = statuses.slice().reverse();
+  pickEl.innerHTML = ordered.map((s, i) => `
+    <button class="year-btn ${i === 0 ? 'active' : ''}" data-year="${s.year}">
+      ${s.year}${s.complete ? '' : ' · YTD'}
+    </button>`).join('');
+  pickEl.querySelectorAll('.year-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pickEl.querySelectorAll('.year-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderYearDetail(D, btn.dataset.year);
+    });
+  });
+}
+
+// ── Year detail — income statement table + top-OpEx horizontal bar chart.
+function renderYearDetail(D, year) {
+  const all = D['qbo-pl_all'] || {};
+  const p = all[year];
+  const periodEl = document.getElementById('is-period');
+  const tableEl = document.getElementById('t-pl');
+  const ctx = document.getElementById('chart-opex');
+  if (!p) {
+    if (tableEl) tableEl.innerHTML = '<tr><td class="empty" colspan="3">No data for this year.</td></tr>';
+    return;
+  }
+  const status = (typeof _yearStatus === 'function') ? _yearStatus(D, year) : { complete: true, monthsCovered: 12, monthName: 'Dec' };
+  if (periodEl) periodEl.textContent = status.complete
+    ? `Full year ${year}`
+    : `${year} YTD through ${status.monthName} (${status.monthsCovered} mo)`;
+
+  if (tableEl) {
+    const row = (label, value, pctOfRev, cls = '') => `
+      <tr class="${cls}">
+        <td>${label}</td>
+        <td class="num">${value == null ? '—' : fmt(value)}</td>
+        <td class="num muted">${pctOfRev == null ? '—' : pctOfRev.toFixed(1) + '%'}</td>
+      </tr>`;
+    const rev = p.revenue || 0;
+    const cogsRows = Object.entries(p.cogs || {})
+      .sort(([,a],[,b]) => (b||0) - (a||0))
+      .map(([k,v]) => row('  ' + k.replace(/_/g, ' '), -v, rev ? -v / rev * 100 : null))
+      .join('');
+    const opexRows = Object.entries(p.opex || {})
+      .sort(([,a],[,b]) => (b||0) - (a||0))
+      .slice(0, 12)
+      .map(([k,v]) => row('  ' + k.replace(/_/g, ' '), -v, rev ? -v / rev * 100 : null))
+      .join('');
+    tableEl.innerHTML = `
+      <thead><tr><th>Line item</th><th class="num">Amount</th><th class="num">% of revenue</th></tr></thead>
+      <tbody>
+        ${row('Revenue', rev, 100, 'total')}
+        ${cogsRows}
+        ${row('Cost of Goods Sold', p.cogsTotal != null ? -p.cogsTotal : null, p.cogsTotal != null && rev ? -p.cogsTotal / rev * 100 : null, 'total')}
+        ${row('Gross Profit', p.grossProfit, p.grossMarginPct, 'total highlight')}
+        ${opexRows}
+        ${row('Operating Expenses', p.opexTotal != null ? -p.opexTotal : null, p.opexTotal != null && rev ? -p.opexTotal / rev * 100 : null, 'total')}
+        ${row('Net Operating Income', p.netOpIncome, rev ? (p.netOpIncome || 0) / rev * 100 : null, 'total highlight')}
+        ${p.ebitda != null ? row('EBITDA (est.)', p.ebitda, rev ? p.ebitda / rev * 100 : null, 'total') : ''}
+      </tbody>`;
+  }
+
+  if (ctx) {
+    if (charts.opex) charts.opex.destroy();
+    const topOpex = Object.entries(p.opex || {})
+      .sort(([,a],[,b]) => (b||0) - (a||0))
+      .slice(0, 10);
+    if (topOpex.length) {
+      charts.opex = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: topOpex.map(([k]) => k.replace(/_/g, ' ')),
+          datasets: [{
+            label: 'OpEx',
+            data: topOpex.map(([,v]) => v),
+            backgroundColor: CHART_COLORS.orange + 'aa',
+            borderColor: CHART_COLORS.orange,
+            borderWidth: 1,
+          }],
+        },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: c => fmt(c.parsed.x) } } },
+          scales: { x: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
+      });
+    }
+  }
+}
+
+// ── EBITDA across all years — complete coloured, YTD greyed.
+function renderEbitdaChart(D) {
+  const all = D['qbo-pl_all'] || {};
+  const statuses = (typeof yearStatusList === 'function') ? yearStatusList(D) : [];
+  const ctx = document.getElementById('chart-ebitda');
+  if (!ctx) return;
+  if (charts.ebitda) charts.ebitda.destroy();
+  const series = statuses.map(s => ({
+    year: s.year, isComplete: s.complete, monthName: s.monthName,
+    ebitda: (all[s.year] && all[s.year].ebitda != null) ? all[s.year].ebitda : null,
+  }));
+  charts.ebitda = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: series.map(s => s.year + (s.isComplete ? '' : ` (YTD ${s.monthName})`)),
+      datasets: [{
+        label: 'EBITDA',
+        data: series.map(s => s.ebitda),
+        backgroundColor: series.map(s => s.isComplete ? CHART_COLORS.green + 'cc' : 'rgba(138,144,160,.3)'),
+        borderColor:     series.map(s => s.isComplete ? CHART_COLORS.green : '#8a90a0'),
+        borderWidth: 1,
+      }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } },
+      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
+  });
+}
+</script>
+</body>
+</html>
