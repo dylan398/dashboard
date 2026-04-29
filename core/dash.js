@@ -242,6 +242,38 @@ function _normalizeName(name) {
 }
  
 /**
+ * Extract the GC company name from a Knowify job. Per Dylan: in the
+ * SFS naming convention, jobs are named "Project - Location - Company"
+ * (sometimes just "Project - Company" when location isn't recorded).
+ * The LAST hyphen-separated segment is the GC company.
+ *
+ * Exception: PlanHub jobs keep j.client = "PlanHub" because the actual
+ * builder isn't known at bid time (PlanHub is a blind-bid platform).
+ *
+ * Falls back to j.client if extraction fails.
+ */
+function extractGCFromJob(j) {
+  if (!j) return null;
+  // PlanHub stays as PlanHub — the real builder is unknown at bid time.
+  const c = (j.client || '').trim();
+  if (/^planhub$/i.test(c) || /planhub/i.test(j.name || '')) return 'PlanHub';
+
+  // Try to pull the last " - " segment from the job name.
+  const name = (j.name || '').trim();
+  if (name) {
+    // Split on " - " (with spaces) to avoid splitting hyphenated single words.
+    const parts = name.split(/\s+-\s+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const last = parts[parts.length - 1];
+      // Sanity: last segment shouldn't be a tiny location code like "TX".
+      // Treat 2-letter all-caps as a state code, fall back to client.
+      if (last.length > 3 && !/^[A-Z]{2,3}$/.test(last)) return last;
+    }
+  }
+  return c || '— Unknown —';
+}
+
+/**
  * Apply Dylan's 4 rules + multi-GC annotation. Returns:
  *   { competitive: { jobs, wins, losses, pending, winRate, dollarWinRate, … },
  *     relationship: { jobs, bids, wonCV, wonCount },
@@ -249,6 +281,10 @@ function _normalizeName(name) {
  *     byGC:       per-GC breakdown sorted by total bid value,
  *     byLead:     per-Sales-Lead breakdown,
  *     rawCounts:  { Active, Closed, Bidding, Rejected } }
+ *
+ * GC name is extracted from j.name (last "Project - Location - Company"
+ * segment) when possible, falling back to j.client. Aliases are then
+ * applied via canonicalGCName so "JPI" merges with "JPI Companies".
  */
 function applyKnowifyRules(rawJobs, opts = {}) {
   const asOf = opts.asOf instanceof Date ? opts.asOf : new Date();
@@ -304,14 +340,19 @@ function applyKnowifyRules(rawJobs, opts = {}) {
   const winRate       = decided.length ? +(wins.length / decided.length * 100).toFixed(1) : null;
   const dollarWinRate = (wonCV + lostCV) ? +(wonCV / (wonCV + lostCV) * 100).toFixed(1) : null;
  
-  // Per-GC breakdown
+  // Per-GC breakdown.
+  // GC NAME EXTRACTION (per Dylan's spec): the actual GC is the last
+  // " - " segment of j.name (format: "Project - Location - Company").
+  // PlanHub keeps "PlanHub" as the GC because the real builder is
+  // unknown at blind-bid time. After extraction, canonicalGCName merges
+  // known aliases (e.g. "JPI" + "JPI Companies").
   const byGC = {};
   competitive.forEach(j => {
-    // Canonicalize the client name so known aliases (e.g. "JPI" + "JPI Companies")
-    // merge into a single byGC row. Falls through to the raw name if the
-    // alias map isn't loaded.
-    const rawGc = (j.client || '').trim() || '— Unknown —';
+    const rawGc = extractGCFromJob(j);
     const gc = (typeof canonicalGCName === 'function') ? canonicalGCName(rawGc) : rawGc;
+    // Stash the extracted name back on the job for downstream consumers
+    // (estimatePaymentDate, classifyGCByOutreach, etc.) that read j.client.
+    j._extractedGC = gc;
     if (!byGC[gc]) byGC[gc] = { gc, bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0 };
     byGC[gc].bids++;
     if (j.outcome === 'win')      { byGC[gc].wins++; byGC[gc].wonCV += j.contractTotal || 0; }
@@ -1820,6 +1861,109 @@ function forecastCollections(D) {
  * Falls back to 60 days (a reasonable industry default for commercial
  * subcontractors) if there's not enough data.
  */
+/**
+ * Per-group win rates from current Knowify data. Returns a map keyed by
+ * outreach group ('A', 'B', 'C-STOP', 'C-PUB', 'C-MIX', 'CHAIN',
+ * 'UNCLASSIFIED', 'DATA-ARTIFACT') with each group's bid count, wins,
+ * losses, pending, won/lost contract value, and $-weighted win rate.
+ *
+ * Per-group rates are MUCH more accurate than the single blended rate
+ * because Group A (>=70% historical win), Group B (30-69%), and the
+ * Group C subgroups (~0% historical) have wildly different conversion
+ * probabilities. Use these instead of one global rate.
+ *
+ * Output:
+ *   {
+ *     A: { bids, wins, losses, pending, wonCV, lostCV, pendingCV, dollarWinRate, sampleSize },
+ *     B: {...}, 'C-STOP': {...}, 'C-PUB': {...}, 'C-MIX': {...},
+ *     CHAIN: {...}, UNCLASSIFIED: {...},
+ *   }
+ */
+function groupWinRates(D) {
+  const knowify = D?.['knowify-jobs'];
+  if (!knowify?.jobs) return null;
+  const R = applyKnowifyRules(knowify.jobs);
+  const out = {
+    A:                { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+    B:                { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+   'C-STOP':          { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+   'C-PUB':           { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+   'C-MIX':           { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+    CHAIN:            { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+    UNCLASSIFIED:     { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+   'DATA-ARTIFACT':   { bids: 0, wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, pendingCV: 0, dollarWinRate: null, sampleSize: 0 },
+  };
+  R.byGC.forEach(g => {
+    const c = (typeof classifyGCByOutreach === 'function')
+      ? classifyGCByOutreach(g.gc, R.byGC)
+      : { group: 'UNCLASSIFIED' };
+    const bucket = out[c.group] || out.UNCLASSIFIED;
+    bucket.bids       += g.bids || 0;
+    bucket.wins       += g.wins || 0;
+    bucket.losses     += g.losses || 0;
+    bucket.pending    += g.pending || 0;
+    bucket.wonCV      += g.wonCV || 0;
+    bucket.lostCV     += g.lostCV || 0;
+    bucket.pendingCV  += g.pendingCV || 0;
+  });
+  Object.values(out).forEach(b => {
+    const decidedCV = b.wonCV + b.lostCV;
+    b.dollarWinRate = decidedCV > 0 ? +(b.wonCV / decidedCV * 100).toFixed(1) : null;
+    b.sampleSize = b.wins + b.losses;
+    b.wonCV     = +b.wonCV.toFixed(2);
+    b.lostCV    = +b.lostCV.toFixed(2);
+    b.pendingCV = +b.pendingCV.toFixed(2);
+  });
+  return out;
+}
+
+
+/**
+ * Pipeline expected wins computed PER GROUP.
+ * For each group: pendingCV × that group's $-win rate. Falls back to the
+ * global $-win rate for groups with insufficient sample (< 5 decided).
+ * PlanHub is discounted because its 0% win rate is a Knowify artifact.
+ */
+function pipelineExpectedByGroup(D) {
+  const groups = groupWinRates(D);
+  if (!groups) return null;
+  const knowify = D?.['knowify-jobs'];
+  const R = knowify?.jobs ? applyKnowifyRules(knowify.jobs) : null;
+  const fallbackRate = R?.competitive?.dollarWinRate || 0;
+  const result = { groups: {}, totalPending: 0, totalExpected: 0, weightedWinRate: null };
+  Object.entries(groups).forEach(([key, g]) => {
+    if (g.pendingCV <= 0) return;
+    let rate = g.dollarWinRate;
+    let source = 'group';
+    if (key === 'DATA-ARTIFACT') {
+      rate = fallbackRate * 0.5;
+      source = 'data-artifact-discounted';
+    } else if (rate == null || g.sampleSize < 5) {
+      rate = fallbackRate;
+      source = 'low-sample-fallback';
+    }
+    const expected = g.pendingCV * (rate || 0) / 100;
+    result.groups[key] = {
+      pendingCV: g.pendingCV, pendingCount: g.pending,
+      winRate: rate, sampleSize: g.sampleSize,
+      expectedValue: +expected.toFixed(2), source,
+    };
+    result.totalPending  += g.pendingCV;
+    result.totalExpected += expected;
+  });
+  result.totalPending   = +result.totalPending.toFixed(2);
+  result.totalExpected  = +result.totalExpected.toFixed(2);
+  result.weightedWinRate = result.totalPending > 0
+    ? +(result.totalExpected / result.totalPending * 100).toFixed(1)
+    : null;
+  result.blendedWinRate = fallbackRate;
+  return result;
+}
+
+/**
+ * Median lag in days between a Knowify pipeline event and revenue
+ * landing in QBO. Falls back to 60 days if there's not enough data.
+ */
 function bidToRevenueLagDays(D) {
   if (typeof pipelineVelocity === 'function') {
     const v = pipelineVelocity(D);
@@ -1829,95 +1973,54 @@ function bidToRevenueLagDays(D) {
 }
 
 /**
- * Unified cash-inflow forecast — combines AR collections (already-invoiced
- * money landing soon) + pipeline-to-revenue (pending bids that will
- * convert and eventually pay).
+ * Unified cash-inflow forecast — keeps AR (precise, near-term) and
+ * Pipeline (probability-weighted, lower confidence) DELIBERATELY SEPARATE.
  *
- * Buckets: 0–30, 31–60, 61–90, 91–120, 120+ days. AR shows up in its
- * own bucket per estimatePaymentDate. Pipeline expected wins are
- * spread by adding bid-to-revenue lag + portfolio median DSO.
- *
- * Output: {
- *   buckets: [{ label, days, ar, pipeline, total, count }],
- *   ar: forecastCollections result,
- *   pipeline: { pendingCV, dollarWinRate, expectedWinValue, lagDays, dsoDays, expectedCashLanding },
- *   totals: { ar, pipeline, combined },
- *   asOf,
- * }
+ * Stacking $500K of real-soon AR with $2M of probability-weighted pipeline
+ * 120+ days out makes the AR look small; they're different kinds of
+ * numbers and shouldn't be summed in the same chart.
  */
 function unifiedCashInflowForecast(D) {
   const ar = forecastCollections(D);
-  const pp = (typeof pipelineProjection === 'function') ? pipelineProjection(D) : null;
+  const groupExpected = (typeof pipelineExpectedByGroup === 'function') ? pipelineExpectedByGroup(D) : null;
   const port = dsoPortfolioSummary(D);
   const lagDays = bidToRevenueLagDays(D);
   const dsoDays = port?.portfolioMedianDSO || 60;
-  // Days-from-now until pipeline-won money lands in cash:
-  //   bid-award lag + invoice-to-cash lag (DSO)
   const pipelineExpectedDays = lagDays + dsoDays;
 
-  const buckets = [
-    { label: '0–30 days',   days: [0, 30],   ar: 0, pipeline: 0, count: 0 },
-    { label: '31–60 days',  days: [31, 60],  ar: 0, pipeline: 0, count: 0 },
-    { label: '61–90 days',  days: [61, 90],  ar: 0, pipeline: 0, count: 0 },
-    { label: '91–120 days', days: [91, 120], ar: 0, pipeline: 0, count: 0 },
-    { label: '120+ days',   days: [121, Infinity], ar: 0, pipeline: 0, count: 0 },
+  const arBuckets = [
+    { label: '0–30 days',   days: [0, 30],   amount: 0, count: 0 },
+    { label: '31–60 days',  days: [31, 60],  amount: 0, count: 0 },
+    { label: '61–90 days',  days: [61, 90],  amount: 0, count: 0 },
+    { label: '91–120 days', days: [91, 120], amount: 0, count: 0 },
+    { label: '120+ days',   days: [121, Infinity], amount: 0, count: 0 },
   ];
-
-  // Map AR forecast buckets onto unified buckets (1:1 by label).
   if (ar?.buckets) {
     ar.buckets.forEach(b => {
-      const t = buckets.find(x => x.label === b.label);
-      if (t) { t.ar += b.amount || 0; t.count += b.count || 0; }
+      const t = arBuckets.find(x => x.label === b.label);
+      if (t) { t.amount += b.amount || 0; t.count += b.count || 0; }
     });
   }
-
-  // Pipeline expected wins land in whichever bucket pipelineExpectedDays falls into.
-  let pipelineDollars = 0;
-  if (pp?.expectedWinValue) {
-    pipelineDollars = pp.expectedWinValue;
-    let i = 0;
-    if (pipelineExpectedDays > 30 && pipelineExpectedDays <= 60) i = 1;
-    else if (pipelineExpectedDays > 60 && pipelineExpectedDays <= 90) i = 2;
-    else if (pipelineExpectedDays > 90 && pipelineExpectedDays <= 120) i = 3;
-    else if (pipelineExpectedDays > 120) i = 4;
-    buckets[i].pipeline += pipelineDollars;
-  }
-
-  buckets.forEach(b => {
-    b.ar = +b.ar.toFixed(2);
-    b.pipeline = +b.pipeline.toFixed(2);
-    b.total = +(b.ar + b.pipeline).toFixed(2);
-  });
+  arBuckets.forEach(b => { b.amount = +b.amount.toFixed(2); });
 
   return {
     asOf: new Date().toISOString(),
-    buckets,
-    ar: ar || null,
-    pipeline: pp ? {
-      pendingCV: pp.pendingValue, dollarWinRate: pp.historicalRate,
-      expectedWinValue: pp.expectedWinValue, lagDays, dsoDays, expectedCashLanding: pipelineExpectedDays,
-    } : null,
-    totals: {
-      ar:       ar?.totalOpen || 0,
-      pipeline: pipelineDollars,
-      combined: +((ar?.totalOpen || 0) + pipelineDollars).toFixed(2),
-    },
+    arBuckets,
+    arTotal: ar?.totalOpen || 0,
+    arInvoiceCount: ar?.invoiceCount || 0,
+    pipelineByGroup: groupExpected?.groups || {},
+    pipelineTotal: groupExpected?.totalExpected || 0,
+    pipelinePending: groupExpected?.totalPending || 0,
+    weightedWinRate: groupExpected?.weightedWinRate ?? null,
+    blendedWinRate:  groupExpected?.blendedWinRate ?? null,
+    timing: { lagDays, dsoDays, expectedCashLanding: pipelineExpectedDays },
   };
 }
 
 /**
- * 12-month financial projection. For each of the next 12 months, project
- * revenue and OpEx using:
- *   • prior-year same-month revenue × YoY-pace ratio (from CY-YTD vs PY-same-period)
- *   • OpEx held at last-complete-year monthly average (modest assumption —
- *     don't over-model; reality depends on hiring decisions)
- *   • implied gross margin from last complete year applied to projected revenue
- *
- * Output: {
- *   months: [{ year, month, revenue, cogs, grossProfit, opex, netIncome, source }],
- *   assumptions: { yoyPaceRatio, gmPct, opexMonthly, baseYear, sourceNotes[] },
- *   summary: { totalRevenue, totalGP, totalOpEx, totalNI }
- * }
+ * 12-month financial projection. Prior-year monthly shape × current YoY
+ * pace ratio. Holds OpEx at last-complete-year monthly average and
+ * gross margin at last-year actual.
  */
 function financialProjection(D) {
   const monthly = D?.['qbo-pl-monthly'];
@@ -1925,26 +2028,20 @@ function financialProjection(D) {
   const all = D?.['qbo-pl_all'] || {};
   const completePL = (typeof _latestAnnualPL === 'function') ? _latestAnnualPL(D) : null;
   if (!completePL || !monthlyByYear) return null;
-
   const baseYear = parseInt(completePL._year, 10);
   const baseMonths = monthlyByYear[String(baseYear)];
   if (!baseMonths || baseMonths.length < 12) return null;
 
-  // YoY pace ratio from same-period YTD comparison
   let paceRatio = 1.0;
   const ytd = (typeof ytdVsPriorSamePeriod === 'function') ? ytdVsPriorSamePeriod(D) : null;
-  if (ytd?.cy?.revenue && ytd?.py?.revenue) {
-    paceRatio = ytd.cy.revenue / ytd.py.revenue;
-  }
+  if (ytd?.cy?.revenue && ytd?.py?.revenue) paceRatio = ytd.cy.revenue / ytd.py.revenue;
 
-  // Monthly OpEx average from last complete year
   const opexMonthly = (completePL.opexTotal || 0) / 12;
   const gmPct = completePL.grossMarginPct != null ? completePL.grossMarginPct / 100 : 0.35;
 
-  // Build next-12-month projection starting from current month
   const today = new Date();
   const startYr = today.getFullYear();
-  const startMo = today.getMonth(); // 0..11
+  const startMo = today.getMonth();
   const months = [];
   let totalRev = 0, totalGP = 0, totalOpEx = 0, totalNI = 0;
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1985,5 +2082,509 @@ function financialProjection(D) {
       totalOpEx:    +totalOpEx.toFixed(2),
       totalNI:      +totalNI.toFixed(2),
     },
+  };
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// SECTION 10 ─ FULL P&L FORECAST MODEL (in-year + next-12-month)
+// ════════════════════════════════════════════════════════════════════════
+//
+// Builds an income-statement-shape monthly forecast that blends:
+//   • Actual months (from qbo-pl-monthly) where data exists.
+//   • Projected months using prior-year same-month shape × YoY pace.
+//   • COGS as a variable cost — scales with projected revenue (1 - GM%).
+//   • OpEx split into FIXED and VARIABLE buckets (by category keyword):
+//       FIXED   = rent, insurance, salaries, utilities, software, depreciation, etc.
+//       VARIABLE = fuel, vehicle, materials, subcontractors, supplies, etc.
+//     Fixed projects flat (last-year monthly avg). Variable scales with revenue.
+//
+// Two views:
+//   inYearForecast(D)        — Jan→Dec of CURRENT calendar year (actuals + projected).
+//   next12MonthsForecast(D)  — rolling 12 months from current month forward.
+//
+// CONTEXT.md §8.0 reminder: this is a planning model, not a target. Don't
+// generate "you're behind plan" alarms from it — variances are expected.
+
+const FIXED_COST_KEYWORDS = [
+  'rent','lease','insurance','salar','payroll tax','office','utility','utilit',
+  'phone','internet','software','subscription','depreciation','amortization',
+  'interest','bank fee','bank charge','professional','legal','accounting',
+  'license','permit','membership','dues','marketing','advertis','training',
+  'cleaning','janitorial',
+];
+const VARIABLE_COST_KEYWORDS = [
+  'material','supplies','fuel','gas','vehicle','truck','auto','equipment rental',
+  'tools','subcontract','commission','job','paint','parts','shipping','postage',
+  'travel','meal','lodging','freight',
+];
+
+function _classifyOpExCategory(name) {
+  if (!name) return 'fixed';
+  const n = name.toLowerCase();
+  for (const kw of VARIABLE_COST_KEYWORDS) if (n.includes(kw)) return 'variable';
+  for (const kw of FIXED_COST_KEYWORDS)    if (n.includes(kw)) return 'fixed';
+  // Default to fixed — most of the SFS OpEx tail (admin, office, etc.) is fixed.
+  return 'fixed';
+}
+
+/**
+ * Split last-complete-year OpEx into fixed and variable monthly amounts.
+ * Returns:
+ *   {
+ *     fixedMonthly: $/month,         // sum of fixed-classified OpEx ÷ 12
+ *     variablePctRevenue: 0..1,      // variable OpEx as fraction of revenue
+ *     fixedCategories: [...],        // diagnostic list
+ *     variableCategories: [...],
+ *     baseYear, baseRevenue,
+ *   }
+ */
+function classifyCosts(D) {
+  const completePL = (typeof _latestAnnualPL === 'function') ? _latestAnnualPL(D) : null;
+  if (!completePL || !completePL.opex || !completePL.revenue) return null;
+  let fixedTotal = 0, variableTotal = 0;
+  const fixedCats = [], variableCats = [];
+  Object.entries(completePL.opex).forEach(([cat, amt]) => {
+    const v = +amt || 0;
+    if (_classifyOpExCategory(cat) === 'variable') {
+      variableTotal += v;
+      variableCats.push({ category: cat.replace(/_/g, ' '), amount: v });
+    } else {
+      fixedTotal += v;
+      fixedCats.push({ category: cat.replace(/_/g, ' '), amount: v });
+    }
+  });
+  fixedCats.sort((a, b) => b.amount - a.amount);
+  variableCats.sort((a, b) => b.amount - a.amount);
+  return {
+    fixedMonthly: +(fixedTotal / 12).toFixed(2),
+    fixedAnnual: +fixedTotal.toFixed(2),
+    variableAnnual: +variableTotal.toFixed(2),
+    variablePctRevenue: completePL.revenue > 0 ? +(variableTotal / completePL.revenue).toFixed(4) : 0,
+    fixedCategories: fixedCats,
+    variableCategories: variableCats,
+    baseYear: completePL._year,
+    baseRevenue: completePL.revenue,
+  };
+}
+
+/**
+ * Build a month-by-month P&L forecast for a given range.
+ * `start` and `end` are Date objects (only year+month matter).
+ *
+ * For each month:
+ *   • If it's <= the latest "actual" month (from qbo-pl-monthly), use actual.
+ *   • Otherwise project: revenue = priorYearSameMonth × paceRatio.
+ *     COGS = revenue × (1 - GM%). FixedOpEx = flat. VariableOpEx = revenue × varPct.
+ *     NI = revenue - COGS - fixedOpEx - variableOpEx.
+ *
+ * Output: { months: [...], totals: {...}, assumptions: {...}, splitAtMonthIndex }
+ */
+function _forecastPLRange(D, start, end) {
+  const monthly = D?.['qbo-pl-monthly'];
+  const monthlyByYear = D?.['qbo-sales']?.monthlyByYear;
+  const all = D?.['qbo-pl_all'] || {};
+  const completePL = (typeof _latestAnnualPL === 'function') ? _latestAnnualPL(D) : null;
+  const costs = classifyCosts(D);
+  if (!completePL || !monthlyByYear || !costs) return null;
+
+  // ── Pipeline-driven revenue inputs ─────────────────────────────
+  // Walk every pending Knowify bid → group win rate → expected revenue
+  // landing month. THIS is the chain the user asked us to use:
+  //   bid → award → invoice → revenue → AR → cash.
+  // See pipelineRevenueSchedule() for the per-bid math.
+  const pipeSchedule = (typeof pipelineRevenueSchedule === 'function') ? pipelineRevenueSchedule(D, 18) : null;
+  const arrival = (typeof bidArrivalRate === 'function') ? bidArrivalRate(D) : null;
+  // Build a map { 'YYYY-MM' → expectedFromCurrentPipeline$ }
+  const pipeRevByYM = {};
+  if (pipeSchedule?.months) {
+    pipeSchedule.months.forEach(m => {
+      pipeRevByYM[`${m.year}-${m.month}`] = m.expectedRev || 0;
+    });
+  }
+
+  // YoY pace ratio (CY-YTD vs PY-same-months)
+  let paceRatio = 1.0;
+  const ytd = (typeof ytdVsPriorSamePeriod === 'function') ? ytdVsPriorSamePeriod(D) : null;
+  if (ytd?.cy?.revenue && ytd?.py?.revenue) paceRatio = ytd.cy.revenue / ytd.py.revenue;
+
+  const gmPct = completePL.grossMarginPct != null ? completePL.grossMarginPct / 100 : 0.35;
+  const fixedMonthly = costs.fixedMonthly;
+  const variablePctRevenue = costs.variablePctRevenue;
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Determine which months we have ACTUAL data for in qbo-pl-monthly
+  const cyYear = monthly?.meta?.year ? String(monthly.meta.year) : String(new Date().getFullYear());
+  const cyStatus = (typeof _yearStatus === 'function') ? _yearStatus(D, cyYear) : { complete: true, monthsCovered: 0 };
+  const cyActualMonths = cyStatus.monthsCovered || 0;
+  const cyMonthsRev = monthly?.revenue?.months || [];
+  const cyMonthsCogs = monthly?.cogs?.months || [];
+  const cyMonthsOpex = monthly?.opex?.months || [];
+
+  const months = [];
+  let totalRev = 0, totalCogs = 0, totalGP = 0,
+      totalFixedOpEx = 0, totalVarOpEx = 0, totalOpEx = 0, totalNI = 0;
+  let actualCount = 0;
+  let firstProjectedIdx = -1;
+
+  // Walk start → end
+  const startYr = start.getFullYear(), startMo = start.getMonth();
+  const endYr = end.getFullYear(), endMo = end.getMonth();
+  const totalMonths = (endYr - startYr) * 12 + (endMo - startMo) + 1;
+
+  for (let i = 0; i < totalMonths; i++) {
+    const yr = startYr + Math.floor((startMo + i) / 12);
+    const moIdx = (startMo + i) % 12;
+    const isCurrentYear = String(yr) === cyYear;
+    const hasActual = isCurrentYear && moIdx < cyActualMonths;
+
+    let rev, cogs, gp, fixedOpEx, varOpEx, opex, ni, source;
+    if (hasActual) {
+      rev = +(cyMonthsRev[moIdx] || 0).toFixed(2);
+      cogs = +(cyMonthsCogs[moIdx] || 0).toFixed(2);
+      // Approximate fixed/variable split from totals — split actual OpEx by ratio
+      const opexActual = +(cyMonthsOpex[moIdx] || 0).toFixed(2);
+      // Without category-grain monthly OpEx, we can't perfectly split actual.
+      // Approximate using last-year's fixed/variable ratio.
+      const totalLastYr = costs.fixedAnnual + costs.variableAnnual;
+      const fixedShare = totalLastYr > 0 ? costs.fixedAnnual / totalLastYr : 1;
+      fixedOpEx = +(opexActual * fixedShare).toFixed(2);
+      varOpEx   = +(opexActual * (1 - fixedShare)).toFixed(2);
+      opex = opexActual;
+      gp = +(rev - cogs).toFixed(2);
+      ni = +(gp - opex).toFixed(2);
+      source = 'actual';
+      actualCount++;
+    } else {
+      // PROJECT — three signals combined:
+      //   (a) Seasonal baseline   = prior-year same-month × YoY pace ratio
+      //   (b) Pipeline-implied    = expected revenue from CURRENT pending bids
+      //                             landing in this month (via group win rate)
+      //   (c) Forward-arrival     = average new bids/month × win rate × avg CV
+      //                             (fills months past where current pending lands)
+      //
+      // The HYBRID picks the larger of (a) and (b + c) per month, since both
+      // are forward indicators of the same underlying volume — but neither alone
+      // is complete. The seasonal baseline assumes throughput stays steady; the
+      // pipeline view assumes only-what's-bid will land. Reality is: current
+      // pending bids will convert AND new bids will arrive.
+      const baseYr = String(parseInt(costs.baseYear, 10));
+      const priorMonths = monthlyByYear[baseYr];
+      const baseRev = priorMonths && priorMonths.length === 12 ? (priorMonths[moIdx] || 0) : 0;
+      const seasonalRev = +(baseRev * paceRatio).toFixed(2);
+
+      // Pipeline-implied for this specific month
+      const pipeRev = pipeRevByYM[`${yr}-${moIdx + 1}`] || 0;
+
+      // Forward-arrival contribution. Months further out (past where today's
+      // pending bids land) get more "new arrival" contribution. Today's pending
+      // covers the next ~lag+30 days only; beyond that, new bids arrive.
+      const monthsFromNow = (yr - new Date().getFullYear()) * 12 + (moIdx - new Date().getMonth());
+      // Within the first month of pipeline-landing window, current pending dominates;
+      // past that, new arrivals fill in linearly.
+      const arrivalRev = arrival ? Math.min(arrival.expectedRevenuePerMonth, seasonalRev) : 0;
+      const pipelineGroundedRev = +(pipeRev + (monthsFromNow >= 1 ? arrivalRev : 0)).toFixed(2);
+
+      // Hybrid: take the larger of seasonal baseline and pipeline-grounded.
+      // If pipeline-grounded is materially higher, that's a signal that this
+      // month has unusual bid concentration; take it. Otherwise default to
+      // seasonal which captures historical throughput.
+      rev = Math.max(seasonalRev, pipelineGroundedRev);
+      const usingPipeline = pipelineGroundedRev > seasonalRev;
+
+      cogs = +(rev * (1 - gmPct)).toFixed(2);
+      gp = +(rev - cogs).toFixed(2);
+      fixedOpEx = +fixedMonthly.toFixed(2);
+      varOpEx = +(rev * variablePctRevenue).toFixed(2);
+      opex = +(fixedOpEx + varOpEx).toFixed(2);
+      ni = +(gp - opex).toFixed(2);
+      source = usingPipeline
+        ? `pipeline ${fmt(pipeRev)} + arrivals → max(${fmt(seasonalRev)}, ${fmt(pipelineGroundedRev)})`
+        : `${costs.baseYear} ${monthNames[moIdx]} × ${paceRatio.toFixed(2)} pace (seasonal)`;
+      if (firstProjectedIdx < 0) firstProjectedIdx = i;
+      // Stash both inputs for the UI to surface
+      var revSeasonal = seasonalRev;
+      var revPipeline = pipelineGroundedRev;
+      var revPipelineFromCurrent = pipeRev;
+      var revPipelineFromArrivals = monthsFromNow >= 1 ? arrivalRev : 0;
+      var revHybridSource = usingPipeline ? 'pipeline-grounded' : 'seasonal-baseline';
+    }
+    months.push({
+      year: yr, month: moIdx + 1, label: `${monthNames[moIdx]} ${yr}`,
+      revenue: rev, cogs, grossProfit: gp,
+      opex, fixedOpEx, variableOpEx: varOpEx,
+      netIncome: ni, source, isActual: source === 'actual',
+      // Forecast-decomposition fields (only present for projected months)
+      revSeasonal: typeof revSeasonal === 'number' ? +revSeasonal.toFixed(2) : null,
+      revPipeline: typeof revPipeline === 'number' ? +revPipeline.toFixed(2) : null,
+      revPipelineFromCurrent: typeof revPipelineFromCurrent === 'number' ? +revPipelineFromCurrent.toFixed(2) : null,
+      revPipelineFromArrivals: typeof revPipelineFromArrivals === 'number' ? +revPipelineFromArrivals.toFixed(2) : null,
+      revHybridSource: revHybridSource || null,
+    });
+    // reset locals so next month doesn't carry over (closure in the for-loop)
+    revSeasonal = revPipeline = revPipelineFromCurrent = revPipelineFromArrivals = null;
+    revHybridSource = null;
+    totalRev += rev; totalCogs += cogs; totalGP += gp;
+    totalFixedOpEx += fixedOpEx; totalVarOpEx += varOpEx;
+    totalOpEx += opex; totalNI += ni;
+  }
+
+  return {
+    months,
+    splitAtMonthIndex: firstProjectedIdx,  // first projected month (or -1 if all actual)
+    actualCount,
+    projectedCount: months.length - actualCount,
+    totals: {
+      revenue:      +totalRev.toFixed(2),
+      cogs:         +totalCogs.toFixed(2),
+      grossProfit:  +totalGP.toFixed(2),
+      fixedOpEx:    +totalFixedOpEx.toFixed(2),
+      variableOpEx: +totalVarOpEx.toFixed(2),
+      opex:         +totalOpEx.toFixed(2),
+      netIncome:    +totalNI.toFixed(2),
+      gmPct:        totalRev > 0 ? +(totalGP / totalRev * 100).toFixed(1) : null,
+      nmPct:        totalRev > 0 ? +(totalNI / totalRev * 100).toFixed(1) : null,
+    },
+    assumptions: {
+      yoyPaceRatio: +paceRatio.toFixed(3),
+      gmPct: +(gmPct * 100).toFixed(1),
+      fixedMonthly: costs.fixedMonthly,
+      variablePctRevenue: +(costs.variablePctRevenue * 100).toFixed(1),
+      baseYear: costs.baseYear,
+      fixedCategoryCount: costs.fixedCategories.length,
+      variableCategoryCount: costs.variableCategories.length,
+    },
+    costClassification: costs,
+  };
+}
+
+/**
+ * In-year forecast: Jan→Dec of the current calendar year.
+ * Months that have already happened use actual data; remaining months are projected.
+ */
+function inYearForecast(D) {
+  const today = new Date();
+  const yr = today.getFullYear();
+  const start = new Date(yr, 0, 1);
+  const end = new Date(yr, 11, 1);
+  return _forecastPLRange(D, start, end);
+}
+
+/**
+ * Next-12-months forecast: rolling 12 months from current month forward.
+ * (Always projected — actual data only fills the very first month if we're
+ * past mid-month and have it, otherwise this is fully forward-looking.)
+ */
+function next12MonthsForecast(D) {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 11);
+  return _forecastPLRange(D, start, end);
+}
+
+/**
+ * Weekly AR collections forecast — distribute open invoices across the next
+ * N weeks based on each invoice's estimated pay date. Returns one row per
+ * week with $ inflow and confidence breakdown.
+ *
+ * Output: { weeks: [{ start, end, label, ar$, count, conf: {high, med, low, unknown} }],
+ *           totalInflow, weeksAhead, asOf }
+ */
+function arForecastByWeek(D, weeksAhead = 26) {
+  const oi = D?.['qbo-open-invoices'];
+  const invoices = oi?.invoices || [];
+  if (!invoices.length) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // Anchor weeks to Monday-start
+  const dow = today.getDay();
+  const monOffset = (dow + 6) % 7; // 0=Mon, 1=Tue, ..., 6=Sun
+  const weekStart0 = new Date(today.getTime() - monOffset * 86400000);
+
+  const weeks = [];
+  for (let i = 0; i < weeksAhead; i++) {
+    const start = new Date(weekStart0.getTime() + i * 7 * 86400000);
+    const end = new Date(start.getTime() + 6 * 86400000);
+    weeks.push({
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+      label: `Wk of ${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+      ar: 0, count: 0,
+      conf: { high: 0, med: 0, low: 0, unknown: 0 },
+    });
+  }
+  const overdue = { ar: 0, count: 0, conf: { high: 0, med: 0, low: 0, unknown: 0 }, items: [] };
+  let totalInflow = 0;
+
+  for (const inv of invoices) {
+    const est = (typeof estimatePaymentDate === 'function') ? estimatePaymentDate(inv, D) : null;
+    const amount = inv.openBalance || 0;
+    if (!est) {
+      // Unknown — pile into overdue bucket conceptually (no estimable week)
+      overdue.ar += amount;
+      overdue.count++;
+      overdue.conf.unknown += amount;
+      overdue.items.push({ inv, est: null });
+      continue;
+    }
+    const payDate = new Date(est.expectedPayDate);
+    payDate.setHours(0, 0, 0, 0);
+    const confKey = est.confidence === 'client-history' ? 'high'
+                  : est.confidence === 'low-sample'     ? 'med'
+                  : est.confidence === 'portfolio-fallback' ? 'low'
+                  : 'unknown';
+    if (payDate < weekStart0) {
+      // Past expected pay date — bucket into overdue (which we add as week-zero overlay)
+      overdue.ar += amount;
+      overdue.count++;
+      overdue.conf[confKey] += amount;
+      overdue.items.push({ inv, est });
+    } else {
+      const weekIdx = Math.floor((payDate - weekStart0) / (7 * 86400000));
+      if (weekIdx < weeksAhead) {
+        const w = weeks[weekIdx];
+        w.ar += amount;
+        w.count++;
+        w.conf[confKey] += amount;
+      }
+      // else falls past horizon — don't add (or could add to a "120+" overflow)
+    }
+    totalInflow += amount;
+  }
+
+  weeks.forEach(w => {
+    w.ar = +w.ar.toFixed(2);
+    Object.keys(w.conf).forEach(k => { w.conf[k] = +w.conf[k].toFixed(2); });
+  });
+  overdue.ar = +overdue.ar.toFixed(2);
+  Object.keys(overdue.conf).forEach(k => { overdue.conf[k] = +overdue.conf[k].toFixed(2); });
+
+  return {
+    asOf: oi?.meta?.parsedAt || new Date().toISOString(),
+    weeksAhead,
+    weeks,
+    overdue,
+    totalInflow: +totalInflow.toFixed(2),
+  };
+}
+
+
+
+// ════════════════════════════════════════════════════════════════════════
+// SECTION 11 ─ PIPELINE-DRIVEN REVENUE (per-bid forward chain)
+// ════════════════════════════════════════════════════════════════════════
+//
+// Walks each pending Knowify bid: extract GC, classify into outreach
+// group, multiply bid CV by that group's $-win rate, time-shift by
+// (bid-to-award lag + project duration), bucket into the resulting
+// month. Output is an expected-revenue stream by month from CURRENT
+// pending bids alone.
+//
+// Used by _forecastPLRange to chain pipeline → revenue → P&L.
+
+const PROJECT_DURATION_DAYS = 30;
+const LOOKBACK_BID_MONTHS = 12;
+
+function pipelineRevenueSchedule(D, monthsAhead) {
+  monthsAhead = monthsAhead || 18;
+  const knowify = D && D['knowify-jobs'];
+  if (!knowify || !knowify.jobs) return null;
+  const R = applyKnowifyRules(knowify.jobs);
+  const groups = (typeof groupWinRates === 'function') ? groupWinRates(D) : null;
+  if (!groups) return null;
+  const lagDays = (typeof bidToRevenueLagDays === 'function') ? bidToRevenueLagDays(D) : 60;
+  const fallbackRate = (R.competitive && R.competitive.dollarWinRate) || 0;
+
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const today = new Date();
+  const startYr = today.getFullYear(), startMo = today.getMonth();
+  const months = [];
+  for (let i = 0; i < monthsAhead; i++) {
+    const yr = startYr + Math.floor((startMo + i) / 12);
+    const moIdx = (startMo + i) % 12;
+    months.push({
+      year: yr, month: moIdx + 1,
+      label: monthNames[moIdx] + ' ' + yr,
+      expectedRev: 0,
+      byGroup: { A: 0, B: 0, 'C-STOP': 0, 'C-PUB': 0, 'C-MIX': 0, CHAIN: 0, UNCLASSIFIED: 0, 'DATA-ARTIFACT': 0 },
+      count: 0, pendingFaceValue: 0,
+    });
+  }
+
+  let totalPending = 0, totalExpected = 0;
+  R.competitive.jobs.forEach(function(j) {
+    if (j.outcome !== 'pending') return;
+    const cv = +j.contractTotal || 0;
+    if (cv <= 0) return;
+    totalPending += cv;
+    const gc = j._extractedGC || (typeof extractGCFromJob === 'function' ? extractGCFromJob(j) : j.client);
+    const c = (typeof classifyGCByOutreach === 'function') ? classifyGCByOutreach(gc, R.byGC) : { group: 'UNCLASSIFIED' };
+    const groupKey = c.group;
+    const groupStat = groups[groupKey];
+    let winRate = (groupStat && groupStat.dollarWinRate != null && groupStat.sampleSize >= 5)
+      ? groupStat.dollarWinRate / 100
+      : fallbackRate / 100;
+    if (groupKey === 'DATA-ARTIFACT') winRate *= 0.5;
+    const expected = cv * winRate;
+    const landDate = new Date(today.getTime() + (lagDays + PROJECT_DURATION_DAYS) * 86400000);
+    const bucketIdx = (landDate.getFullYear() - startYr) * 12 + (landDate.getMonth() - startMo);
+    if (bucketIdx >= 0 && bucketIdx < monthsAhead) {
+      const b = months[bucketIdx];
+      b.expectedRev += expected;
+      b.byGroup[groupKey] = (b.byGroup[groupKey] || 0) + expected;
+      b.count++;
+      b.pendingFaceValue += cv;
+    }
+    totalExpected += expected;
+  });
+
+  months.forEach(function(m) {
+    m.expectedRev = +m.expectedRev.toFixed(2);
+    m.pendingFaceValue = +m.pendingFaceValue.toFixed(2);
+    Object.keys(m.byGroup).forEach(function(k) { m.byGroup[k] = +m.byGroup[k].toFixed(2); });
+  });
+
+  return {
+    months: months,
+    totalPending: +totalPending.toFixed(2),
+    totalExpected: +totalExpected.toFixed(2),
+    weightedWinRate: totalPending > 0 ? +(totalExpected / totalPending * 100).toFixed(1) : null,
+    assumptions: {
+      lagDays: lagDays,
+      projectDurationDays: PROJECT_DURATION_DAYS,
+      monthsAhead: monthsAhead,
+      fallbackRate: fallbackRate,
+    },
+  };
+}
+
+function bidArrivalRate(D) {
+  const knowify = D && D['knowify-jobs'];
+  if (!knowify || !knowify.jobs) return null;
+  const R = applyKnowifyRules(knowify.jobs);
+  const groups = (typeof groupWinRates === 'function') ? groupWinRates(D) : null;
+  if (!groups) return null;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - LOOKBACK_BID_MONTHS);
+  const recent = R.competitive.jobs.filter(function(j) {
+    if (!j.createdDate) return false;
+    const d = new Date(j.createdDate);
+    return !isNaN(d) && d >= cutoff;
+  });
+  if (!recent.length) return null;
+  const bidsPerMonth = recent.length / LOOKBACK_BID_MONTHS;
+  const totalCV = recent.reduce(function(s, j) { return s + (+j.contractTotal || 0); }, 0);
+  const avgBidCV = recent.length ? totalCV / recent.length : 0;
+  const blendedWR = R.competitive.dollarWinRate || 0;
+  const expectedRevenuePerMonth = bidsPerMonth * avgBidCV * (blendedWR / 100);
+  return {
+    bidsPerMonth: +bidsPerMonth.toFixed(1),
+    avgBidCV: +avgBidCV.toFixed(2),
+    expectedRevenuePerMonth: +expectedRevenuePerMonth.toFixed(2),
+    blendedWinRate: blendedWR,
+    sampleMonths: LOOKBACK_BID_MONTHS,
+    sampleBids: recent.length,
   };
 }

@@ -26,12 +26,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=12"></script>
-<script src="../core/utils.js?v=12"></script>
-<script src="../core/gc-segmentation.js?v=12"></script>
-<script src="../core/dso-reference.js?v=12"></script>
-<script src="../core/dash.js?v=12"></script>
-<script src="../core/nav.js?v=12"></script>
+<script src="../core/firebase.js?v=17"></script>
+<script src="../core/utils.js?v=17"></script>
+<script src="../core/gc-segmentation.js?v=17"></script>
+<script src="../core/dso-reference.js?v=17"></script>
+<script src="../core/dash.js?v=17"></script>
+<script src="../core/nav.js?v=17"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -103,6 +103,16 @@ a{color:inherit;text-decoration:none}
 
 .legend{display:flex;gap:14px;font-size:11px;color:var(--txt-muted);margin-top:6px}
 .legend-dot{display:inline-block;width:10px;height:10px;border-radius:1px;margin-right:5px;vertical-align:middle}
+
+.tab-btn{
+  background:var(--bg-card);border:1px solid var(--border);color:var(--txt-secondary);
+  padding:8px 14px;font-family:var(--font-display);font-size:11px;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;
+}
+.tab-btn:hover{border-color:var(--yellow);color:var(--txt-primary)}
+.tab-btn.active{background:var(--yellow);color:#000;border-color:var(--yellow);font-weight:700}
+.tag-actual{background:rgba(62,207,142,.18);color:var(--green);font-family:var(--font-mono);font-size:9px;padding:2px 6px;border-radius:2px;letter-spacing:.04em;font-weight:600}
+.tag-projected{background:rgba(74,158,255,.18);color:var(--blue);font-family:var(--font-mono);font-size:9px;padding:2px 6px;border-radius:2px;letter-spacing:.04em;font-weight:600}
 </style>
 </head>
 <body>
@@ -112,10 +122,10 @@ a{color:inherit;text-decoration:none}
 
   <div class="page-note">
     <b>How the three forecasts interact:</b><br>
-    • <b>AR forecast</b> tracks already-invoiced money — for each open invoice, expected pay date = invoice date + that customer's median DSO (auto-computed from QBO Transaction Detail).<br>
-    • <b>Pipeline forecast</b> turns Knowify pending bids into expected new revenue — pending CV × historical $-win rate. Then <b>lagged by</b> bid-to-revenue median (when bids actually convert to invoices) + portfolio DSO (when invoices become cash).<br>
-    • <b>Financial projection</b> extrapolates next-12-month revenue from last complete year's monthly shape × current YoY pace. Holds OpEx at last-year monthly average and gross margin at last-year actual.<br>
-    The combined cash-inflow forecast adds AR + pipeline expected cash by 30/60/90/120-day bucket. Pipeline lands later because of the bid→invoice→cash chain.
+    • <b>AR forecast (high confidence — already-invoiced money)</b>: each open invoice gets paired with that customer's median DSO. Auto-computed from QBO Transaction Detail. Maps to a 30/60/90/120-day bucket.<br>
+    • <b>Pipeline expected by GROUP (lower confidence — probability-weighted)</b>: pending bids split into Group A/B/C buckets (Group A wins ≥70%, Group B 30–69%, Group C historically near 0%). Each group's pending $ × that group's $-win rate. <b>Per-group rates are much more accurate than a single blended rate</b> — Group C pending shouldn't be valued the same as Group A pending.<br>
+    • <b>Financial projection</b>: next-12-month revenue from last complete year's monthly shape × current YoY pace. OpEx held at prior-year monthly average.<br>
+    <b>Why AR and Pipeline are shown separately:</b> stacking $500K of real-soon AR with $2M of probability-weighted pipeline 120+ days out makes the AR look small. They're different kinds of numbers. AR is precise and near-term; pipeline is a planning input with real uncertainty about which bids land and when.
   </div>
 
   <div id="empty-state" class="empty" style="display:none">
@@ -151,20 +161,51 @@ a{color:inherit;text-decoration:none}
       <div class="cap" id="flow-cap">—</div>
     </div>
 
-    <!-- ═══════ COMBINED CASH-INFLOW BUCKETS ═══════ -->
-    <div class="section-label"><span><span class="accent">▸</span>Combined cash inflow by bucket</span><span class="hint">AR (already invoiced) + Pipeline (expected wins, lagged)</span></div>
+    <!-- ═══════ AR COLLECTIONS — HIGH-CONFIDENCE ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>AR collections (high confidence)</span>
+      <span class="hint">Already-invoiced money · per-customer DSO × open balance</span>
+    </div>
     <div class="grid-2">
       <div class="panel">
-        <div class="panel-title"><span>By Time-to-Cash Bucket</span><span class="meta">stacked AR + pipeline</span></div>
-        <div id="bucket-block"></div>
-        <div class="legend">
-          <span><span class="legend-dot" style="background:var(--yellow)"></span>AR (open invoices)</span>
-          <span><span class="legend-dot" style="background:var(--blue)"></span>Pipeline (expected wins, lagged)</span>
-        </div>
+        <div class="panel-title"><span>Expected $ by Bucket</span><span class="meta">precise, near-term</span></div>
+        <div id="ar-bucket-block"></div>
+        <div class="cap">These are real invoices already on the books, projected to pay using each customer's historical median DSO. Confidence is high relative to pipeline numbers.</div>
       </div>
       <div class="panel">
-        <div class="panel-title"><span>Cash Inflow Curve</span><span class="meta">$ landing by bucket</span></div>
-        <div class="chart-wrap h280"><canvas id="chart-buckets"></canvas></div>
+        <div class="panel-title"><span>AR Inflow Curve</span><span class="meta">$ landing by bucket</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-ar-buckets"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════ PIPELINE EXPECTED — BY GROUP ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Pipeline expected by outreach group</span>
+      <span class="hint">Lower confidence · per-group $-win rate, not blended</span>
+    </div>
+    <div class="page-note" style="border-left-color:var(--orange);background:rgba(224,123,43,.06);margin-bottom:14px">
+      <b>Why per-group rates matter:</b> Group A historically wins ≥70% of competitive bids;
+      Group C subgroups historically win near 0%. Multiplying total pending × one blended rate
+      treats $1 of Group A pending the same as $1 of Group C pending — they shouldn't be.
+      The numbers below split pending by group and apply each group's actual rate.
+      <br><br>
+      <b>This is still a probability-weighted estimate</b>: it doesn't tell you which specific
+      bids will land or when. Treat it as planning context for capacity, not as committed revenue.
+      The bid → invoice → cash chain typically takes ~<span id="lag-summary">—</span> days total.
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Expected Wins by Group</span><span class="meta">pendingCV × group win rate</span></div>
+        <div style="overflow:auto"><table class="t" id="t-pipeline-by-group">
+          <thead><tr>
+            <th>Group</th><th class="num">Pending bids</th><th class="num">Pending $</th>
+            <th class="num">Group $-win rate</th><th class="num">Expected $</th><th>Source</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Pipeline Expected — by Group</span><span class="meta">probability-weighted</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-pipeline-by-group"></canvas></div>
       </div>
     </div>
 
@@ -189,8 +230,105 @@ a{color:inherit;text-decoration:none}
       <div id="pipeline-detail"></div>
     </div>
 
-    <!-- ═══════ 12-MONTH PROJECTION ═══════ -->
-    <div class="section-label"><span><span class="accent">▸</span>12-month financial projection</span><span class="hint">prior-year monthly shape × current YoY pace</span></div>
+    <!-- ═══════ COMBINED P&L FORECAST ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Combined P&L forecast</span>
+      <span class="hint">YTD actuals + projected remaining months · variable & fixed cost split</span>
+    </div>
+    <div class="page-note" style="border-left-color:var(--green);background:rgba(62,207,142,.06);margin-bottom:14px">
+      <b>How this forecast is built — the full chain:</b><br>
+      &nbsp;&nbsp;<span style="color:var(--yellow)">●</span> <b>Actual</b> — months already closed; from the QBO monthly P&L.<br>
+      &nbsp;&nbsp;<span style="color:var(--green)">●</span> <b>Pipeline (current pending)</b> — for each currently-pending Knowify bid: extract GC, classify into Group A/B/C, multiply bid CV by THAT GROUP's $-win rate, time-shift by Knowify median bid-to-award lag + ~30d project duration, land the expected revenue in that month.<br>
+      &nbsp;&nbsp;<span style="color:var(--blue)">●</span> <b>Pipeline (forward arrivals)</b> — for months past where current pending lands: average new-bids/month × win rate × avg CV. Captures bids that haven't arrived yet but will.<br>
+      &nbsp;&nbsp;<span style="color:var(--purple)">●</span> <b>Seasonal uplift</b> — when prior-year-shape × YoY pace gives a higher number than the pipeline view (signal that historical throughput exceeds what's currently in the funnel).<br>
+      Each month's revenue = <code>max(seasonal baseline, pipeline-grounded)</code>. COGS = revenue × (1 - GM%). OpEx is split <b>FIXED</b> (rent, insurance, salaries, utilities — held flat) and <b>VARIABLE</b> (fuel, vehicle, materials, subcontractors — scale with revenue). Then per-customer DSO carries it from booked revenue → AR → cash.
+    </div>
+
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="tab-btn active" data-tab="in-year" onclick="switchForecastTab('in-year')">This Year (Jan→Dec)</button>
+      <button class="tab-btn" data-tab="next-12" onclick="switchForecastTab('next-12')">Next 12 Months</button>
+      <button class="tab-btn" data-tab="weekly-ar" onclick="switchForecastTab('weekly-ar')">Weekly AR (next 26 wks)</button>
+    </div>
+
+    <!-- IN-YEAR TAB -->
+    <div id="tab-in-year" class="forecast-tab" style="display:block">
+      <div class="kpi-row" id="iy-kpi-row" style="grid-template-columns:repeat(6,1fr)"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-title"><span>This Year — Revenue · GP · NI</span><span class="meta" id="iy-meta">—</span></div>
+          <div class="chart-wrap h360"><canvas id="chart-iy"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>Cost Composition</span><span class="meta">fixed vs variable per month</span></div>
+          <div class="chart-wrap h360"><canvas id="chart-iy-costs"></canvas></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Month-by-Month — Income Statement</span><span class="meta">A = actual · P = projected</span></div>
+        <div style="overflow:auto"><table class="t" id="t-iy">
+          <thead><tr>
+            <th>Month</th><th></th>
+            <th class="num">Revenue</th>
+            <th class="num">↳ Pipeline (current)</th>
+            <th class="num">↳ Pipeline (arrivals)</th>
+            <th class="num">↳ Seasonal baseline</th>
+            <th class="num">COGS</th><th class="num">Gross Profit</th>
+            <th class="num">Fixed OpEx</th><th class="num">Var. OpEx</th><th class="num">Net Income</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- NEXT-12 TAB -->
+    <div id="tab-next-12" class="forecast-tab" style="display:none">
+      <div class="kpi-row" id="n12-kpi-row" style="grid-template-columns:repeat(6,1fr)"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-title"><span>Next 12 Months — Revenue · GP · NI</span><span class="meta" id="n12-meta">—</span></div>
+          <div class="chart-wrap h360"><canvas id="chart-n12"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>Cost Composition</span><span class="meta">fixed vs variable per month</span></div>
+          <div class="chart-wrap h360"><canvas id="chart-n12-costs"></canvas></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Month-by-Month — Income Statement</span><span class="meta">all months projected</span></div>
+        <div style="overflow:auto"><table class="t" id="t-n12">
+          <thead><tr>
+            <th>Month</th><th></th>
+            <th class="num">Revenue</th>
+            <th class="num">↳ Pipeline (current)</th>
+            <th class="num">↳ Pipeline (arrivals)</th>
+            <th class="num">↳ Seasonal baseline</th>
+            <th class="num">COGS</th><th class="num">Gross Profit</th>
+            <th class="num">Fixed OpEx</th><th class="num">Var. OpEx</th><th class="num">Net Income</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- WEEKLY AR TAB -->
+    <div id="tab-weekly-ar" class="forecast-tab" style="display:none">
+      <div class="kpi-row" id="war-kpi-row" style="grid-template-columns:repeat(4,1fr)"></div>
+      <div class="panel">
+        <div class="panel-title"><span>Weekly AR Inflow Forecast</span><span class="meta">26 weeks ahead, stacked by confidence</span></div>
+        <div class="chart-wrap h360"><canvas id="chart-war"></canvas></div>
+        <div class="cap" id="war-cap">—</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Week-by-Week Detail</span></div>
+        <div style="overflow:auto;max-height:420px"><table class="t" id="t-war">
+          <thead><tr>
+            <th>Week</th><th class="num">$ Inflow</th><th class="num"># Invoices</th>
+            <th class="num">High conf.</th><th class="num">Medium</th><th class="num">Low</th>
+          </tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ═══════ 12-MONTH PROJECTION (legacy, simpler view) ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>Simple 12-month projection (legacy view)</span><span class="hint">prior-year monthly shape × current YoY pace, OpEx held flat</span></div>
     <div class="grid-2">
       <div class="panel">
         <div class="panel-title"><span>Projected Revenue · GP · NI</span><span class="meta" id="proj-base">—</span></div>
@@ -228,19 +366,214 @@ loadDashboard((D, raw) => {
 
   renderKPIs(D);
   renderFlow(D);
-  renderBuckets(D);
+  renderARBuckets(D);
+  renderPipelineByGroup(D);
   renderARConfidence(D);
   renderSoonest(D);
   renderPipelineDetail(D);
+  renderInYearForecast(D);
+  renderNext12Months(D);
+  renderWeeklyAR(D);
   renderProjection(D);
 });
 
-function renderKPIs(D) {
-  const u = unifiedCashInflowForecast(D);
-  const fc = u?.ar;
-  const pp = u?.pipeline;
-  const proj = financialProjection(D);
-  const portfolio = dsoPortfolioSummary(D);
+// Tab switcher for the combined forecast section
+function switchForecastTab(tab) {
+  document.querySelectorAll('.forecast-tab').forEach(t => t.style.display = 'none');
+  const target = document.getElementById('tab-' + tab);
+  if (target) target.style.display = 'block';
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+}
+
+// Shared helper: render one P&L forecast view (used for both in-year and next-12)
+function _renderPLForecast(view, prefix) {
+  if (!view) return;
+  const t = view.totals;
+  const a = view.assumptions;
+
+  // KPIs
+  const kpi = (label, value, opts = {}) => `
+    <div class="kpi" style="--kpi-color:var(--${opts.color || 'border-bright'})">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${opts.color || ''}">${value}</div>
+      <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
+    </div>`;
+  document.getElementById(prefix + '-kpi-row').innerHTML = [
+    kpi('Total Revenue', fmtK(t.revenue), { color: 'yellow', sub: `${view.actualCount}A · ${view.projectedCount}P months` }),
+    kpi('Gross Profit', fmtK(t.grossProfit), { color: 'green', sub: t.gmPct != null ? t.gmPct + '% margin' : '' }),
+    kpi('Fixed OpEx', fmtK(t.fixedOpEx), { color: 'orange', sub: `~${fmtK(a.fixedMonthly)}/mo` }),
+    kpi('Variable OpEx', fmtK(t.variableOpEx), { color: 'orange', sub: `~${a.variablePctRevenue}% of revenue` }),
+    kpi('Net Income', fmtK(t.netIncome), { color: t.netIncome >= 0 ? 'green' : 'red', sub: t.nmPct != null ? t.nmPct + '% net margin' : '' }),
+    kpi('YoY pace', a.yoyPaceRatio + '×', { color: 'blue', sub: `base year ${a.baseYear}` }),
+  ].join('');
+
+  // Meta
+  const meta = document.getElementById(prefix + '-meta');
+  if (meta) meta.textContent = `${view.actualCount} actual / ${view.projectedCount} projected · pace ${a.yoyPaceRatio}× · base ${a.baseYear}`;
+
+  // Revenue chart — STACKED revenue decomposition so the chain is visible:
+  //   • Actual (yellow)               — months that have closed
+  //   • Pipeline (current pending)    — green: bid CV × per-group win rate, lagged
+  //   • Pipeline (forward arrivals)   — blue:  avg new bids/mo × win rate × avg CV
+  //   • Seasonal uplift (top-up)      — purple: when seasonal baseline > pipeline-grounded
+  // Plus a Net Income line on top.
+  const ctx = document.getElementById('chart-' + prefix);
+  if (charts[prefix]) charts[prefix].destroy();
+  const splitIdx = view.splitAtMonthIndex;
+  const labels = view.months.map((m, i) => (i === splitIdx ? '▼ ' : '') + m.label);
+
+  // Compute per-month decomposition
+  const decomp = view.months.map(m => {
+    if (m.isActual) {
+      return { actual: m.revenue, pipelineCurrent: 0, pipelineArrivals: 0, seasonalUplift: 0 };
+    }
+    const pipeCur = m.revPipelineFromCurrent || 0;
+    const pipeArr = m.revPipelineFromArrivals || 0;
+    const pipeGrounded = pipeCur + pipeArr;
+    const seasonalUplift = Math.max(0, (m.revSeasonal || 0) - pipeGrounded);
+    return { actual: 0, pipelineCurrent: pipeCur, pipelineArrivals: pipeArr, seasonalUplift };
+  });
+
+  charts[prefix] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Actual revenue', data: decomp.map(d => d.actual),
+          backgroundColor: CHART_COLORS.yellow + 'cc', borderColor: CHART_COLORS.yellow, borderWidth: 1, stack: 'rev', order: 4 },
+        { label: 'Pipeline — from current pending', data: decomp.map(d => d.pipelineCurrent),
+          backgroundColor: CHART_COLORS.green + 'cc', borderColor: CHART_COLORS.green, borderWidth: 1, stack: 'rev', order: 3 },
+        { label: 'Pipeline — from forward arrivals', data: decomp.map(d => d.pipelineArrivals),
+          backgroundColor: CHART_COLORS.blue + 'aa', borderColor: CHART_COLORS.blue, borderWidth: 1, stack: 'rev', order: 2 },
+        { label: 'Seasonal uplift (where pace > pipeline)', data: decomp.map(d => d.seasonalUplift),
+          backgroundColor: CHART_COLORS.purple + '99', borderColor: CHART_COLORS.purple, borderWidth: 1, stack: 'rev', order: 1 },
+        { label: 'Net Income', data: view.months.map(m => m.netIncome), type: 'line',
+          borderColor: '#f5c842', tension: 0.2, borderWidth: 2.5,
+          pointRadius: view.months.map(m => m.isActual ? 5 : 4),
+          pointBackgroundColor: view.months.map(m => m.isActual ? '#f5c842' : '#0d0f14'),
+          pointBorderColor: '#f5c842',
+          pointBorderWidth: view.months.map(m => m.isActual ? 0 : 2),
+          order: 0,
+        },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: {
+        label: c => c.dataset.label + ': ' + fmt(c.parsed.y),
+        afterLabel: c => {
+          const m = view.months[c.dataIndex];
+          if (m.isActual) return '(actual P&L month)';
+          return [
+            `Source mix: ${m.revHybridSource || '—'}`,
+            `  Pipeline (current): ${fmt(m.revPipelineFromCurrent || 0)}`,
+            `  Pipeline (arrivals): ${fmt(m.revPipelineFromArrivals || 0)}`,
+            `  Seasonal baseline: ${fmt(m.revSeasonal || 0)}`,
+            `  → Hybrid revenue: ${fmt(m.revenue)}`,
+          ].join('\n');
+        },
+      } } } },
+  });
+
+  // Cost composition chart — stacked fixed + variable per month
+  const ctxC = document.getElementById('chart-' + prefix + '-costs');
+  if (charts[prefix + 'Costs']) charts[prefix + 'Costs'].destroy();
+  charts[prefix + 'Costs'] = new Chart(ctxC, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'COGS (variable)', data: view.months.map(m => m.cogs),
+          backgroundColor: CHART_COLORS.orange + 'aa', borderColor: CHART_COLORS.orange, borderWidth: 1, stack: 'cost' },
+        { label: 'Variable OpEx', data: view.months.map(m => m.variableOpEx),
+          backgroundColor: CHART_COLORS.purple + 'aa', borderColor: CHART_COLORS.purple, borderWidth: 1, stack: 'cost' },
+        { label: 'Fixed OpEx', data: view.months.map(m => m.fixedOpEx),
+          backgroundColor: CHART_COLORS.red + 'aa', borderColor: CHART_COLORS.red, borderWidth: 1, stack: 'cost' },
+        { label: 'Revenue', data: view.months.map(m => m.revenue), type: 'line',
+          borderColor: CHART_COLORS.yellow, tension: 0.2, borderWidth: 2, pointRadius: 3 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
+      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
+  });
+
+  // Month table — with the revenue-decomposition columns visible.
+  // For projected months: Pipeline(current) + Pipeline(arrivals) is the
+  // pipeline-grounded estimate; Seasonal baseline is the alternative
+  // signal; the Revenue column = max(seasonal, pipeline-grounded).
+  // For actual months the decomposition columns are dashes since the
+  // number is real, not modelled.
+  const tbody = document.querySelector('#t-' + prefix + ' tbody');
+  let tPC = 0, tPA = 0, tSB = 0;
+  tbody.innerHTML = view.months.map(m => {
+    const pc = m.revPipelineFromCurrent || 0;
+    const pa = m.revPipelineFromArrivals || 0;
+    const sb = m.revSeasonal || 0;
+    if (!m.isActual) { tPC += pc; tPA += pa; tSB += sb; }
+    return `<tr>
+      <td><strong>${m.label}</strong></td>
+      <td>${m.isActual ? '<span class="tag-actual">A</span>' : '<span class="tag-projected">P</span>'}</td>
+      <td class="num">${fmt(m.revenue)}</td>
+      <td class="num ${m.isActual ? 'muted' : 'green'}">${m.isActual ? '—' : fmt(pc)}</td>
+      <td class="num ${m.isActual ? 'muted' : 'blue'}">${m.isActual ? '—' : fmt(pa)}</td>
+      <td class="num muted">${m.isActual ? '—' : fmt(sb)}</td>
+      <td class="num muted">${fmt(-m.cogs)}</td>
+      <td class="num green">${fmt(m.grossProfit)}</td>
+      <td class="num muted">${fmt(-m.fixedOpEx)}</td>
+      <td class="num muted">${fmt(-m.variableOpEx)}</td>
+      <td class="num ${m.netIncome >= 0 ? 'green' : 'orange'}">${fmt(m.netIncome)}</td>
+    </tr>`;
+  }).join('') + `
+    <tr style="border-top:2px solid var(--border-bright);font-weight:700">
+      <td><strong>Total</strong></td>
+      <td></td>
+      <td class="num">${fmt(t.revenue)}</td>
+      <td class="num green">${fmt(tPC)}</td>
+      <td class="num blue">${fmt(tPA)}</td>
+      <td class="num muted">${fmt(tSB)}</td>
+      <td class="num muted">${fmt(-t.cogs)}</td>
+      <td class="num green">${fmt(t.grossProfit)}</td>
+      <td class="num muted">${fmt(-t.fixedOpEx)}</td>
+      <td class="num muted">${fmt(-t.variableOpEx)}</td>
+      <td class="num ${t.netIncome >= 0 ? 'green' : 'orange'}" style="color:var(--yellow)">${fmt(t.netIncome)}</td>
+    </tr>`;
+}
+
+function renderInYearForecast(D) {
+  const view = (typeof inYearForecast === 'function') ? inYearForecast(D) : null;
+  if (!view) {
+    document.querySelector('#t-iy tbody').innerHTML = '<tr><td colspan="8" class="empty">Need at least one complete year of P&L plus monthly sales-by-customer history.</td></tr>';
+    return;
+  }
+  _renderPLForecast(view, 'iy');
+}
+
+function renderNext12Months(D) {
+  const view = (typeof next12MonthsForecast === 'function') ? next12MonthsForecast(D) : null;
+  if (!view) {
+    document.querySelector('#t-n12 tbody').innerHTML = '<tr><td colspan="8" class="empty">Need at least one complete year of P&L plus monthly sales-by-customer history.</td></tr>';
+    return;
+  }
+  _renderPLForecast(view, 'n12');
+}
+
+function renderWeeklyAR(D) {
+  const view = (typeof arForecastByWeek === 'function') ? arForecastByWeek(D) : null;
+  const tbody = document.querySelector('#t-war tbody');
+  const cap = document.getElementById('war-cap');
+  if (!view) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No open invoices to forecast.</td></tr>';
+    if (cap) cap.textContent = '—';
+    return;
+  }
+
+  // KPIs: total inflow, overdue, total weeks with $, avg/week
+  const totalCounted = view.weeks.reduce((s, w) => s + w.ar, 0);
+  const weeksWithInflow = view.weeks.filter(w => w.ar > 0).length;
+  const avgPerWeek = weeksWithInflow ? totalCounted / weeksWithInflow : 0;
 
   const kpi = (label, value, opts = {}) => `
     <div class="kpi" style="--kpi-color:var(--${opts.color || 'border-bright'})">
@@ -248,245 +581,29 @@ function renderKPIs(D) {
       <div class="kpi-value ${opts.color || ''}">${value}</div>
       <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
     </div>`;
-
-  document.getElementById('kpi-row').innerHTML = [
-    kpi('Open AR', fc ? fmtK(fc.totalOpen) : '—',
-      { color: 'yellow', sub: fc ? `${fc.invoiceCount} invoices` : 'no open invoices' }),
-    kpi('Expected ≤30d', u ? fmtK(u.buckets[0].total) : '—',
-      { color: 'green', sub: u ? `AR ${fmtK(u.buckets[0].ar)} · pipeline ${fmtK(u.buckets[0].pipeline)}` : '' }),
-    kpi('Expected 31–90d', u ? fmtK((u.buckets[1].total||0) + (u.buckets[2].total||0)) : '—',
-      { color: 'blue', sub: u ? `bridge cash` : '' }),
-    kpi('Pipeline expected', pp?.expectedWinValue != null ? fmtK(pp.expectedWinValue) : '—',
-      { color: 'blue', sub: pp ? `lag ${pp.expectedCashLanding}d → cash` : 'no pipeline data' }),
-    kpi('12-mo projection', proj ? fmtK(proj.summary.totalRevenue) : '—',
-      { color: 'yellow', sub: proj ? `NI ${fmtK(proj.summary.totalNI)} @ ${proj.assumptions.yoyPaceRatio}× pace` : 'need full year + monthly' }),
+  document.getElementById('war-kpi-row').innerHTML = [
+    kpi('Total inflow (next 26 wks)', fmtK(totalCounted),
+      { color: 'green', sub: `${weeksWithInflow} of 26 weeks have AR landing` }),
+    kpi('Avg per active week', fmtK(avgPerWeek),
+      { color: 'yellow', sub: 'Across weeks with any inflow' }),
+    kpi('Past-expected (overdue)', fmtK(view.overdue.ar),
+      { color: 'orange', sub: `${view.overdue.count} invoice${view.overdue.count === 1 ? '' : 's'} past est. pay date` }),
+    kpi('Open AR total', fmtK(view.totalInflow),
+      { color: 'blue', sub: 'sum of all open invoices' }),
   ].join('');
-}
 
-function renderFlow(D) {
-  const u = unifiedCashInflowForecast(D);
-  if (!u) return;
-  const fc = u.ar, pp = u.pipeline;
-  document.getElementById('flow-pending').textContent = pp ? fmtK(pp.pendingCV) : '—';
-  document.getElementById('flow-pending-sub').textContent = pp ? `${pp.dollarWinRate}% historical $-win rate → ${fmtK(pp.expectedWinValue)} expected` : 'no pipeline data';
-  document.getElementById('flow-ar').textContent = fc ? fmtK(fc.totalOpen) : '—';
-  document.getElementById('flow-ar-sub').textContent = fc ? `${fc.invoiceCount} open invoices` : '—';
-  const cash30plus60 = (u.buckets[0].total || 0) + (u.buckets[1].total || 0);
-  const cash90 = cash30plus60 + (u.buckets[2].total || 0);
-  document.getElementById('flow-cash').textContent = fmtK(cash90);
-  document.getElementById('flow-cash-sub').textContent = `0–90 days · combined AR + pipeline`;
-  if (pp) {
-    document.getElementById('lag-meta').textContent = `bid → award lag: ${pp.lagDays}d · DSO: ${pp.dsoDays}d · total bid-to-cash: ${pp.expectedCashLanding}d`;
-  }
-  document.getElementById('flow-cap').textContent = pp
-    ? `Pipeline cash lands roughly ${pp.expectedCashLanding} days from today: ${pp.lagDays}d to convert a winning bid into an invoice (Knowify median for completed bids), plus ${pp.dsoDays}d portfolio DSO until that invoice gets paid. Open AR is already on the books — it lands sooner.`
-    : '';
-}
-
-function renderBuckets(D) {
-  const u = unifiedCashInflowForecast(D);
-  if (!u) return;
-  const total = Math.max(1, u.buckets.reduce((s, b) => s + b.total, 0));
-  const buckets = u.buckets;
-  document.getElementById('bucket-block').innerHTML = buckets.map(b => {
-    const arPct = b.total > 0 ? (b.ar / total * 100) : 0;
-    const plPct = b.total > 0 ? (b.pipeline / total * 100) : 0;
-    return `<div class="bucket-row">
-      <div class="lbl">${b.label}</div>
-      <div class="bar"><div class="bar-ar" style="width:${arPct}%"></div><div class="bar-pl" style="width:${plPct}%"></div></div>
-      <div class="v">${b.total > 0 ? fmtK(b.ar) : '—'}</div>
-      <div class="v">${b.total > 0 ? fmtK(b.pipeline) : '—'}</div>
-      <div class="v">${b.total > 0 ? fmtK(b.total) : '—'}</div>
-    </div>`;
-  }).join('') + `<div class="bucket-row" style="border-top:1px solid var(--border-bright);margin-top:4px">
-    <div class="lbl" style="color:var(--txt-primary);font-weight:700">Total</div>
-    <div></div>
-    <div class="v">${fmtK(u.totals.ar)}</div>
-    <div class="v">${fmtK(u.totals.pipeline)}</div>
-    <div class="v" style="color:var(--yellow);font-weight:700">${fmtK(u.totals.combined)}</div>
-  </div>`;
-
-  // Stacked bar chart
-  const ctx = document.getElementById('chart-buckets');
-  if (charts.buckets) charts.buckets.destroy();
-  charts.buckets = new Chart(ctx, {
+  // Stacked bar chart by week, segmented by confidence
+  const labels = view.weeks.map(w => w.label);
+  const ctx = document.getElementById('chart-war');
+  if (charts.war) charts.war.destroy();
+  charts.war = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: buckets.map(b => b.label),
+      labels,
       datasets: [
-        { label: 'AR (open invoices)', data: buckets.map(b => b.ar),
-          backgroundColor: CHART_COLORS.yellow + 'aa', borderColor: CHART_COLORS.yellow, borderWidth: 1, stack: 'cash' },
-        { label: 'Pipeline (expected, lagged)', data: buckets.map(b => b.pipeline),
-          backgroundColor: CHART_COLORS.blue + 'aa', borderColor: CHART_COLORS.blue, borderWidth: 1, stack: 'cash' },
-      ],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
-      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
-  });
-}
-
-function renderARConfidence(D) {
-  const fc = forecastCollections(D);
-  const portfolio = dsoPortfolioSummary(D);
-  const sourceLabel = portfolio?.source === 'computed-from-transactions'
-    ? `auto-computed · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
-    : portfolio?.source === 'static-baseline'
-      ? `static baseline · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
-      : 'no DSO history';
-  document.getElementById('dso-source').textContent = sourceLabel;
-  if (!fc) {
-    document.getElementById('ar-confidence').innerHTML = '<div class="empty">No open invoices.</div>';
-    return;
-  }
-  const total = Math.max(1, fc.totalOpen);
-  const c = fc.confidenceBreakdown;
-  document.getElementById('ar-confidence').innerHTML = `
-    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
-      <div class="lbl" style="color:var(--green)">Client history</div>
-      <div class="bar"><div class="bar-ar" style="width:${(c.clientHistory/total*100).toFixed(1)}%;background:var(--green)"></div></div>
-      <div class="v">${(c.clientHistory/total*100).toFixed(0)}%</div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
-      <div class="lbl" style="color:var(--yellow)">Low sample (n&lt;3)</div>
-      <div class="bar"><div class="bar-ar" style="width:${(c.lowSample/total*100).toFixed(1)}%;background:var(--yellow)"></div></div>
-      <div class="v">${(c.lowSample/total*100).toFixed(0)}%</div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
-      <div class="lbl" style="color:var(--orange)">Portfolio prior</div>
-      <div class="bar"><div class="bar-ar" style="width:${(c.portfolioFallback/total*100).toFixed(1)}%;background:var(--orange)"></div></div>
-      <div class="v">${(c.portfolioFallback/total*100).toFixed(0)}%</div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:160px 1fr 80px">
-      <div class="lbl" style="color:var(--txt-muted)">Unknown</div>
-      <div class="bar"><div class="bar-ar" style="width:${(c.unknown/total*100).toFixed(1)}%;background:var(--txt-muted)"></div></div>
-      <div class="v">${(c.unknown/total*100).toFixed(0)}%</div>
-    </div>`;
-}
-
-function renderSoonest(D) {
-  const fc = forecastCollections(D);
-  const tbody = document.querySelector('#t-soonest tbody');
-  if (!fc?.topExpectedSoonest?.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No invoices with estimates.</td></tr>';
-    return;
-  }
-  const rows = fc.topExpectedSoonest.slice(0, 15);
-  tbody.innerHTML = rows.map(({ inv, est }) => {
-    if (!est) return `<tr><td>${inv.customer || '—'}</td><td class="num">${fmtK(inv.openBalance)}</td><td class="num muted">—</td><td class="num muted">no estimate</td><td class="num muted">—</td></tr>`;
-    const confLabel = est.confidence === 'client-history' ? `client n=${est.nPaid}`
-                    : est.confidence === 'low-sample'     ? `low (n=${est.nPaid})`
-                    : est.confidence === 'portfolio-fallback' ? 'portfolio'
-                    : '—';
-    const confClass = est.confidence === 'client-history' ? 'green'
-                    : est.confidence === 'low-sample'     ? 'yellow'
-                    : 'orange';
-    return `<tr>
-      <td>${est.customer || inv.customer}</td>
-      <td class="num">${fmtK(est.amount)}</td>
-      <td class="num">${est.daysOpen}d</td>
-      <td class="num"><span class="muted">${est.expectedPayDate}</span><br><span style="font-size:10px;color:${est.isLate ? 'var(--orange)' : 'var(--txt-muted)'}">${est.isLate ? 'past expected' : '~' + est.remainingDays + 'd'}</span></td>
-      <td class="num ${confClass}">${confLabel}</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderPipelineDetail(D) {
-  const u = unifiedCashInflowForecast(D);
-  const pp = u?.pipeline;
-  const el = document.getElementById('pipeline-detail');
-  if (!pp) {
-    el.innerHTML = '<div class="empty">No Knowify pipeline data.</div>';
-    return;
-  }
-  el.innerHTML = `
-    <div class="grid-3">
-      <div class="flow-card">
-        <div class="lbl">Step 1 · Pending bid value</div>
-        <div class="val">${fmtK(pp.pendingCV)}</div>
-        <div class="sub">live competitive funnel</div>
-      </div>
-      <div class="flow-card">
-        <div class="lbl">Step 2 · Historical $-win rate</div>
-        <div class="val" style="color:var(--blue)">${pp.dollarWinRate}%</div>
-        <div class="sub">won $ ÷ (won + lost $)</div>
-      </div>
-      <div class="flow-card">
-        <div class="lbl">Step 3 · Expected wins</div>
-        <div class="val" style="color:var(--green)">${fmtK(pp.expectedWinValue)}</div>
-        <div class="sub">pending × win rate</div>
-      </div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr;border-top:1px solid var(--border-bright);margin-top:14px;padding-top:10px">
-      <div class="lbl">Bid → invoice lag</div>
-      <div class="v" style="text-align:left">${pp.lagDays} days <span class="muted">(median time-to-award from Knowify completed bids)</span></div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr">
-      <div class="lbl">Invoice → cash lag</div>
-      <div class="v" style="text-align:left">${pp.dsoDays} days <span class="muted">(portfolio median DSO)</span></div>
-    </div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr">
-      <div class="lbl" style="color:var(--yellow);font-weight:700">Total bid → cash</div>
-      <div class="v" style="text-align:left;color:var(--yellow);font-weight:700">${pp.expectedCashLanding} days</div>
-    </div>`;
-}
-
-function renderProjection(D) {
-  const proj = financialProjection(D);
-  const el = document.getElementById('proj-summary');
-  const tbody = document.querySelector('#t-proj tbody');
-  if (!proj) {
-    el.innerHTML = '<div class="empty">Need at least one complete year of P&L plus monthly sales-by-customer history.</div>';
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">—</td></tr>';
-    if (charts.proj) charts.proj.destroy();
-    return;
-  }
-  document.getElementById('proj-base').textContent = `base year ${proj.assumptions.baseYear} · pace ${proj.assumptions.yoyPaceRatio}×`;
-  el.innerHTML = `
-    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Base-year shape</div><div class="v" style="text-align:left">${proj.assumptions.baseYear} monthly</div></div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">YoY pace ratio</div><div class="v" style="text-align:left">${proj.assumptions.yoyPaceRatio}× <span class="muted">(${(proj.assumptions.yoyPaceRatio*100-100).toFixed(1)}%)</span></div></div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Held GM%</div><div class="v" style="text-align:left">${proj.assumptions.gmPct}%</div></div>
-    <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">Held monthly OpEx</div><div class="v" style="text-align:left">${fmtK(proj.assumptions.opexMonthly)}</div></div>
-    <div style="border-top:1px solid var(--border-bright);margin-top:10px;padding-top:10px">
-      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo Revenue</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalRevenue)}</div></div>
-      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo GP</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalGP)}</div></div>
-      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl">12-mo OpEx</div><div class="v" style="text-align:left">${fmtK(proj.summary.totalOpEx)}</div></div>
-      <div class="bucket-row" style="grid-template-columns:200px 1fr"><div class="lbl" style="color:var(--yellow);font-weight:700">12-mo Net Income</div><div class="v" style="text-align:left;color:${proj.summary.totalNI >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${fmtK(proj.summary.totalNI)}</div></div>
-    </div>
-    <div class="cap" style="margin-top:10px">${proj.assumptions.sourceNotes.join(' ')}</div>`;
-
-  // Chart
-  const ctx = document.getElementById('chart-proj');
-  if (charts.proj) charts.proj.destroy();
-  charts.proj = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: proj.months.map(m => m.label),
-      datasets: [
-        { label: 'Revenue', data: proj.months.map(m => m.revenue),
-          backgroundColor: CHART_COLORS.yellow + '99', borderColor: CHART_COLORS.yellow, borderWidth: 1, order: 3 },
-        { label: 'Gross Profit', data: proj.months.map(m => m.grossProfit),
-          backgroundColor: CHART_COLORS.green + 'aa', borderColor: CHART_COLORS.green, borderWidth: 1, order: 2 },
-        { label: 'Net Income', data: proj.months.map(m => m.netIncome), type: 'line',
-          borderColor: CHART_COLORS.blue, tension: 0.2, borderWidth: 2, pointRadius: 4, order: 1 },
-      ],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-      scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } },
-      plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt(c.parsed.y) } } } },
-  });
-
-  // Table
-  tbody.innerHTML = proj.months.map(m => `<tr>
-    <td><strong>${m.label}</strong></td>
-    <td class="num">${fmt(m.revenue)}</td>
-    <td class="num muted">${fmt(-m.cogs)}</td>
-    <td class="num green">${fmt(m.grossProfit)}</td>
-    <td class="num muted">${fmt(-m.opex)}</td>
-    <td class="num ${m.netIncome >= 0 ? 'green' : 'orange'}">${fmt(m.netIncome)}</td>
-    <td class="muted" style="font-size:11px">${m.source}</td>
-  </tr>`).join('');
-}
-</script>
-</body>
-</html>
+        { label: 'High confidence (client history)', data: view.weeks.map(w => w.conf.high),
+          backgroundColor: CHART_COLORS.green + 'aa', borderColor: CHART_COLORS.green, borderWidth: 1, stack: 'ar' },
+        { label: 'Medium (low sample)', data: view.weeks.map(w => w.conf.med),
+          backgroundColor: CHART_COLORS.yellow + 'aa', borderColor: CHART_COLORS.yellow, borderWidth: 1, stack: 'ar' },
+        { label: 'Low (portfolio fallback)', data: view.weeks.map(w => w.conf.low),
+          backgroundColor: CHART_COLORS.o
