@@ -22,10 +22,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=10"></script>
-<script src="../core/utils.js?v=10"></script>
-<script src="../core/dash.js?v=10"></script>
-<script src="../core/nav.js?v=10"></script>
+<link rel="stylesheet" href="../core/styles.css?v=11">
+<script src="../core/firebase.js?v=11"></script>
+<script src="../core/utils.js?v=11"></script>
+<script src="../core/gc-segmentation.js?v=11"></script>
+<script src="../core/dso-reference.js?v=11"></script>
+<script src="../core/dash.js?v=11"></script>
+<script src="../core/nav.js?v=11"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -127,6 +130,34 @@ a{color:inherit;text-decoration:none}
       </div>
     </div>
  
+    <div class="section-label">
+      <span><span class="accent">▸</span> Expected Collections Forecast</span>
+      <span class="hint">Per-customer DSO history × open invoices</span>
+    </div>
+    <div class="page-note blue">
+      <b>How this works:</b> the dashboard pairs each open invoice with the historical median days-to-pay
+      for that customer (computed automatically from the QBO Transaction Detail you've already uploaded —
+      Invoices on the AR account FIFO-matched to Payments). Customers with ≥3 paid invoices in history get
+      a client-specific estimate; everyone else falls back to the portfolio median. <b>This is a planning
+      input, not a chase list</b> — SFS doesn't control when AR pays (CONTEXT.md §8.0).
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Forecast by Bucket</span><span class="meta" id="fc-source">—</span></div>
+        <div id="forecast-buckets"></div>
+        <div id="forecast-confidence" style="margin-top:14px;font-size:11.5px;color:var(--txt-muted);line-height:1.55"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Soonest Expected Payments</span><span class="meta">Top 25 by remaining days</span></div>
+        <div class="t-scroll" style="max-height:340px;background:transparent">
+          <table class="t" id="t-forecast">
+            <thead><tr><th>Customer</th><th class="num">Amount</th><th class="num">Days open</th><th class="num">Expected pay</th><th class="num">Confidence</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+ 
     <div class="section-label"><span><span class="accent">▸</span> Open AR by Customer</span><span style="color:var(--txt-muted);font-family:var(--font-mono);font-size:10px">Descriptive — not a watchlist</span></div>
     <div class="panel" style="padding:0">
       <div class="t-scroll" style="max-height:540px"><table class="t" id="t-customers"><thead><tr><th>Customer</th><th>Open balance</th><th>Open invoices</th><th>Avg days out</th><th>Oldest open</th></tr></thead><tbody></tbody></table></div>
@@ -168,10 +199,92 @@ loadDashboard((D, raw) => {
   renderRevenueChart(D);
   renderDistribution(D);
   renderStats(D);
+  renderForecast(D);
   renderCustomersTable(D);
   renderInvoicesTable(D);
   renderLifetimeTable(D);
 });
+ 
+// ── Collections forecast (auto-computed from qbo-transactions; static fallback)
+function renderForecast(D) {
+  const fc = (typeof forecastCollections === 'function') ? forecastCollections(D) : null;
+  const portfolio = (typeof dsoPortfolioSummary === 'function') ? dsoPortfolioSummary(D) : null;
+  const sourceLabel = portfolio?.source === 'computed-from-transactions'
+    ? `Computed from ${portfolio.totalInvoices} matched invoices · portfolio median ${portfolio.portfolioMedianDSO}d`
+    : portfolio?.source === 'static-baseline'
+      ? `Static baseline (re-upload Transaction Detail to refresh) · ${portfolio.totalInvoices} matched · median ${portfolio.portfolioMedianDSO}d`
+      : 'No DSO history yet';
+  document.getElementById('fc-source').textContent = sourceLabel;
+ 
+  const bucketEl = document.getElementById('forecast-buckets');
+  if (!fc) {
+    bucketEl.innerHTML = '<div class="empty">No open invoices to forecast.</div>';
+    document.getElementById('t-forecast').querySelector('tbody').innerHTML =
+      '<tr><td colspan="5" class="empty">—</td></tr>';
+    return;
+  }
+ 
+  // Bucket bars
+  const total = fc.totalOpen || 1;
+  const colors = ['var(--green)', 'var(--yellow)', 'var(--orange)', 'var(--red)', 'var(--red)', 'var(--txt-muted)'];
+  bucketEl.innerHTML = fc.buckets.map((b, i) => {
+    if (b.amount <= 0 && b.count === 0) return '';
+    const pct = (b.amount / total * 100).toFixed(1);
+    return `<div class="aging-row">
+      <div class="label">${b.label}</div>
+      <div class="bar"><div class="bar-fill" style="width:${pct}%;background:${colors[i]}"></div></div>
+      <div class="val">${fmtK(b.amount)}</div>
+    </div>
+    <div style="font-size:10px;color:var(--txt-muted);text-align:right;margin:-4px 4px 6px 0;font-family:var(--font-mono)">${b.count} inv${b.count===1?'':'s'} · ${pct}%</div>`;
+  }).join('');
+ 
+  // Confidence breakdown
+  const c = fc.confidenceBreakdown || {};
+  const tOk = (c.clientHistory || 0);
+  const tLow = (c.lowSample || 0);
+  const tFb = (c.portfolioFallback || 0);
+  const tUn = (c.unknown || 0);
+  document.getElementById('forecast-confidence').innerHTML = `
+    <b>Confidence breakdown</b> (% of open AR $):
+    <span style="color:var(--green)">client history ${(tOk/total*100).toFixed(0)}%</span> ·
+    <span style="color:var(--yellow)">low sample ${(tLow/total*100).toFixed(0)}%</span> ·
+    <span style="color:var(--orange)">portfolio prior ${(tFb/total*100).toFixed(0)}%</span>${tUn > 0 ? ` · <span style="color:var(--txt-muted)">unknown ${(tUn/total*100).toFixed(0)}%</span>` : ''}.
+    Customers with ≥3 paid invoices in history get a client-specific estimate.`;
+ 
+  // Soonest-expected table
+  const tbody = document.getElementById('t-forecast').querySelector('tbody');
+  const rows = (fc.topExpectedSoonest || []).slice(0, 25);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">No invoices with estimates.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(({inv, est}) => {
+    if (!est) return `<tr>
+      <td>${inv.customer || '—'}</td>
+      <td class="num">${fmtK(inv.openBalance)}</td>
+      <td class="num muted">—</td>
+      <td class="num muted">no estimate</td>
+      <td class="num muted">—</td>
+    </tr>`;
+    const confLabel = est.confidence === 'client-history'      ? `client n=${est.nPaid}`
+                    : est.confidence === 'low-sample'          ? `low (n=${est.nPaid})`
+                    : est.confidence === 'portfolio-fallback'  ? 'portfolio'
+                    : '—';
+    const confClass = est.confidence === 'client-history' ? 'green'
+                    : est.confidence === 'low-sample'     ? 'yellow'
+                    : 'orange';
+    const overdueTag = est.isLate
+      ? `<span style="color:var(--orange);font-size:10px">past expected</span>`
+      : `<span class="muted" style="font-size:10px">~${est.remainingDays}d remaining</span>`;
+    return `<tr>
+      <td>${est.customer || inv.customer || '—'}</td>
+      <td class="num">${fmtK(est.amount)}</td>
+      <td class="num">${est.daysOpen}d</td>
+      <td class="num"><span class="muted">${est.expectedPayDate}</span><br>${overdueTag}</td>
+      <td class="num"><span class="${confClass}">${confLabel}</span></td>
+    </tr>`;
+  }).join('');
+}
  
 // ── KPI strip — descriptive: customer count, total lifetime, current open AR, count of open invoices
 function renderKPIs(D) {
