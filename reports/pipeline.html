@@ -33,10 +33,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=8"></script>
-<script src="../core/utils.js?v=8"></script>
-<script src="../core/dash.js?v=8"></script>
-<script src="../core/nav.js?v=8"></script>
+<script src="../core/firebase.js?v=9"></script>
+<script src="../core/utils.js?v=9"></script>
+<script src="../core/gc-segmentation.js?v=9"></script>
+<script src="../core/dash.js?v=9"></script>
+<script src="../core/nav.js?v=9"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -157,6 +158,20 @@ tr:hover td{background:var(--bg-hover)}
       <div class="panel-title">Won vs Lost vs Pending Contract Value</div>
       <div class="chart-box short"><canvas id="cvChart"></canvas></div>
     </div>
+  </div>
+ 
+  <!-- ═══════ PENDING BY OUTREACH GROUP ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Pending bid $ by outreach group</span><span class="hint">A / B / C segmentation · see Outreach page for detail</span></div>
+  <div class="panel">
+    <div class="panel-title">Forward Bookings, Split By Group <span class="meta">descriptive — context for the booking floor</span></div>
+    <div class="panel-body" style="margin-bottom:8px">
+      The booking-floor number above blends pending bids from every group. This panel splits it: how much of the
+      live pending value sits in <span class="tag yellow">Group&nbsp;A</span> (already-winning relationships) vs
+      <span class="tag info">Group&nbsp;B</span> (active competitive) vs <span class="tag muted">Group&nbsp;C</span>
+      (subgroups with zero historical wins). A pending pipeline weighted toward Group A converts at a much
+      higher rate than one weighted toward Group C — useful context, not a do-something insight.
+    </div>
+    <div style="overflow-x:auto"><table id="groupDistTable"></table></div>
   </div>
  
   <!-- ═══════ PENDING VOLUME BY GC ═══════ -->
@@ -382,6 +397,36 @@ function renderQuality(R){
   el('multiGCProjects').textContent = R.multiGC.projectCount ?? 0;
 }
  
+function renderGroupDist(D){
+  if (typeof bidDistributionByGroup !== 'function') return;
+  const dist = bidDistributionByGroup(D);
+  if (!dist) return;
+  const order = ['A','B','C-STOP','C-PUB','C-MIX','DATA-ARTIFACT','UNCLASSIFIED'];
+  const labels = {
+    A:'Group A — wins held', B:'Group B — competitive',
+    'C-STOP':'C-STOP (chain-locked-pattern)', 'C-PUB':'C-PUB (public-sector)',
+    'C-MIX':'C-MIX (mixed commercial)',
+    'DATA-ARTIFACT':'PlanHub (data artifact)', UNCLASSIFIED:'Unclassified',
+  };
+  let html = `<thead><tr>
+    <th>Group</th><th class="num">GCs</th><th class="num">All-time bids</th>
+    <th class="num">Pending</th><th class="num">Pending $</th><th class="num">Won $</th>
+  </tr></thead><tbody>`;
+  order.forEach(g => {
+    const b = dist[g]; if (!b || b.gcCount === 0) return;
+    html += `<tr>
+      <td>${labels[g] || g}</td>
+      <td class="num">${b.gcCount}</td>
+      <td class="num">${b.bids}</td>
+      <td class="num" style="color:var(--yellow)">${b.pending}</td>
+      <td class="num">${fmt$(b.pendingCV)}</td>
+      <td class="num">${fmt$(b.wonCV)}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  el('groupDistTable').innerHTML = html;
+}
+ 
 function renderRelationship(R){
   const rel = R.relationship || { bids: 0, wonCount: 0, wonCV: 0 };
   el('relBlock').innerHTML = `
@@ -407,6 +452,7 @@ function render(D){
   renderFunnel(R);
   renderCVChart(R);
   renderGCTable(R);
+  renderGroupDist(D);
   renderLeadTable(R);
   renderQuality(R);
   renderRelationship(R);
