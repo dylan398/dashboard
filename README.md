@@ -18,18 +18,22 @@ dashboard/
 │   └── CONTEXT.md             ← BUSINESS + INDUSTRY CONTEXT (read first)
 ├── index.html                 ← Overview (the dashboard home)
 ├── reports/
-│   ├── insights.html          ← Auto-generated business observations
-│   ├── pl.html                ← Revenue & Profit
-│   ├── cash.html              ← Cash & Balance Sheet
-│   ├── customers.html         ← Customers & AR (days-to-pay framing)
+│   ├── insights.html          ← Auto-generated business observations (internal-lever focus)
+│   ├── pl.html                ← Revenue & Profit (partial-year flagged + labor leverage)
+│   ├── cash.html              ← Cash & Balance Sheet (informational; SBA loan in progress)
+│   ├── customers.html         ← Customers & AR + auto collections forecast
 │   ├── vendors.html           ← Vendors & AP
-│   └── pipeline.html          ← Knowify pipeline (with SFS rules)
+│   ├── pipeline.html          ← Knowify pipeline (with SFS rules)
+│   └── outreach.html          ← Group A/B/C customer segmentation
 ├── viewer.html                ← Raw-data browser
 ├── admin.html                 ← Data ingest portal (password-gated)
 ├── core/
+│   ├── styles.css             ← Shared design tokens, panels, KPIs, tables
 │   ├── firebase.js            ← Firebase init + DB read/write helpers
 │   ├── utils.js               ← CSV parsing, formatters, splitCSVRow
-│   ├── dash.js                ← Shared metrics + Knowify rule engine + insights
+│   ├── gc-segmentation.js     ← Static GC → Group A/B/C classification + alias map
+│   ├── dso-reference.js       ← Static DSO baseline (auto-recomputed from QBO when data lands)
+│   ├── dash.js                ← Shared metrics + Knowify + DSO + insights
 │   └── nav.js                 ← Multi-page nav header
 └── parsers/
     ├── qbo-pl.js              ← P&L (annual)
@@ -37,15 +41,17 @@ dashboard/
     ├── qbo-bs.js              ← Balance Sheet (every snapshot kept)
     ├── qbo-cf.js              ← Cash Flow Statement
     ├── qbo-sales.js           ← Sales by Customer Detail
-    ├── qbo-transactions.js    ← Transaction Detail by Account
+    ├── qbo-transactions.js    ← Transaction Detail (AR detail uncapped — feeds DSO)
     ├── qbo-ar-aging.js        ← A/R Aging Summary
     ├── qbo-ap-aging.js        ← A/P Aging Summary
     ├── qbo-open-invoices.js   ← Open Invoices (CSV + XLSX)
-    └── knowify-jobs.js        ← Knowify Advanced Jobs Report (XLSX)
+    ├── knowify-jobs.js        ← Knowify Advanced Jobs Report (XLSX)
+    └── qbo-dso-by-client.js   ← Deprecated. Not loaded by admin. DSO is auto-computed.
 Live URLs
 
 Reports/Overview: https://dylan398.github.io/dashboard/
 Insights: https://dylan398.github.io/dashboard/reports/insights.html
+Outreach (A/B/C): https://dylan398.github.io/dashboard/reports/outreach.html
 Viewer (raw data): https://dylan398.github.io/dashboard/viewer.html
 Admin (data upload): https://dylan398.github.io/dashboard/admin.html
 
