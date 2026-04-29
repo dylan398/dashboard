@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<!--
+  Outreach / Customer Segmentation — DESCRIPTIVE only.
+ 
+  ▶ Read docs/CONTEXT.md §2.5 + §8.0 before editing.
+ 
+    This page surfaces the Group A / B / C segmentation that came out
+    of the April-2026 pricing-sensitivity analysis. Important framing:
+    the *segmentation* is useful (it describes the shape of the bid
+    book), but the *recommendations* attached to each group ("dinners
+    with these," "stop bidding those") are analyst-suggested, not what
+    SFS is actually going to do. Treat them with much less weight.
+ 
+    PlanHub is shown separately under "DATA-ARTIFACT" — won PlanHub
+    bids get renamed to the real GC after award, so the apparent 0%
+    win rate isn't a real signal and is excluded from C-STOP totals.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Outreach Segmentation</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js?v=9"></script>
+<script src="../core/utils.js?v=9"></script>
+<script src="../core/gc-segmentation.js?v=9"></script>
+<script src="../core/dash.js?v=9"></script>
+<script src="../core/nav.js?v=9"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+ 
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:16px}
+.page-note{background:var(--bg-card);border-left:3px solid var(--yellow);padding:11px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:24px;line-height:1.55}
+.page-note b{color:var(--txt-primary)}
+ 
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+.section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
+ 
+.group-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
+.group-card{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden;border-top:3px solid var(--c,var(--border-bright))}
+.group-card.A{--c:var(--green)}
+.group-card.B{--c:var(--blue)}
+.group-card.cstop{--c:var(--red)}
+.group-card.cpub{--c:var(--purple)}
+.group-card.cmix{--c:var(--orange)}
+.gc-tag{font-family:var(--font-display);font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--c)}
+.gc-name{font-family:var(--font-display);font-size:16px;font-weight:600;margin:2px 0 6px;color:var(--txt-primary)}
+.gc-stat{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;border-bottom:1px dashed var(--border)}
+.gc-stat:last-child{border:none}
+.gc-stat .l{color:var(--txt-muted)}
+.gc-stat .v{font-family:var(--font-mono);color:var(--txt-primary);font-weight:500}
+ 
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:16px;margin-bottom:14px}
+.panel-title{font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{color:var(--txt-muted);font-size:10px;letter-spacing:.05em;text-transform:none;font-weight:400}
+.panel-body{color:var(--txt-secondary);font-size:13px;line-height:1.55}
+.panel-body b{color:var(--txt-primary)}
+ 
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.chart-box{position:relative;height:280px}
+.chart-box.short{height:220px}
+ 
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
+th.num,td.num{text-align:right;font-family:var(--font-mono)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary)}
+tr:hover td{background:var(--bg-hover)}
+ 
+.tag{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10px;letter-spacing:.05em;font-weight:600}
+.tag.A{background:rgba(62,207,142,.15);color:var(--green)}
+.tag.B{background:rgba(74,158,255,.15);color:var(--blue)}
+.tag.cstop{background:rgba(224,82,82,.15);color:var(--red)}
+.tag.cpub{background:rgba(155,109,255,.15);color:var(--purple)}
+.tag.cmix{background:rgba(224,123,43,.15);color:var(--orange)}
+.tag.dataartifact{background:rgba(138,144,160,.18);color:var(--txt-secondary)}
+.tag.unclassified{background:rgba(138,144,160,.1);color:var(--txt-muted)}
+ 
+.empty{color:var(--txt-muted);font-style:italic;padding:20px;text-align:center}
+.cap{font-size:11px;color:var(--txt-muted);margin-top:8px;line-height:1.55;font-style:italic}
+.notebox{background:rgba(245,200,66,.06);border:1px solid rgba(245,200,66,.2);padding:10px 14px;font-size:12.5px;color:var(--txt-secondary);line-height:1.55;margin-top:10px}
+ 
+.subtle{color:var(--txt-muted);font-size:12px}
+</style>
+</head>
+<body>
+<div id="nav-mount"></div>
+ 
+<div class="main">
+  <div class="page-title">CUSTOMER SEGMENTATION</div>
+  <div class="page-sub">Group A / B / C view of the GC bid book — descriptive only.</div>
+ 
+  <div class="page-note">
+    <b>How to read this page:</b> the groups below describe the *shape* of the bid book — which GCs win bids consistently,
+    which are competitive, which haven't awarded SFS work despite many submissions. The segmentation came out of the April-2026
+    pricing-sensitivity analysis. <b>Treat the recommendations attached to each group with significantly less weight than the
+    groupings themselves</b> — they're analyst suggestions, not directives.
+    <br><br>
+    <b>Role split for outreach (when it happens):</b> Group&nbsp;B is owner-level — relationship-keeping calls/dinners with
+    people SFS already does business with. Group&nbsp;C is estimator-level — diagnostic post-loss calls to find out *why*
+    these bids aren't turning into wins (incumbent sub? scope? certification? price?). Different conversations, different
+    people. Don't conflate them.
+    <br><br>
+    PlanHub is shown separately under <b>data-artifact</b>: won PlanHub bids get renamed to the real GC in Knowify after
+    award, so its apparent 0% win rate isn't a real number.
+  </div>
+ 
+  <!-- ═══════ GROUP CARDS ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Bid book by group</span><span class="hint">Live from Knowify · counts are bid records</span></div>
+  <div class="group-row" id="groupRow"></div>
+ 
+  <!-- ═══════ DISTRIBUTION ═══════ -->
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Pending Bid $ by Group <span class="meta">live competitive funnel</span></div>
+      <div class="chart-box short"><canvas id="pendingChart"></canvas></div>
+      <div class="cap">Pending value across the live competitive funnel, split by where each GC sits in the segmentation. Useful for capacity-planning context — what kind of bid book is currently in flight.</div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Won CV by Group <span class="meta">historical (decided bids)</span></div>
+      <div class="chart-box short"><canvas id="wonChart"></canvas></div>
+      <div class="cap">Where won contract value has historically come from. Group A and Group B together typically account for the bulk of revenue.</div>
+    </div>
+  </div>
+ 
+  <!-- ═══════ GROUP A ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Group A — Inelastic relationships</span><span class="hint">≥70% WR · ≥5 decided bids · derived live from Knowify</span></div>
+  <div class="panel">
+    <div class="panel-title">High-Win-Rate GCs <span class="meta">descriptive — no action attached</span></div>
+    <div class="panel-body" style="margin-bottom:10px">
+      GCs that have awarded SFS the work consistently. Relationship is the operative variable. Not a list to "do something" with —
+      a list to be aware of.
+    </div>
+    <div style="overflow-x:auto"><table id="groupATable"></table></div>
+  </div>
+ 
+  <!-- ═══════ GROUP B ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Group B — Active competitive</span><span class="hint">Owner-level outreach · 30–69% WR · 5+ bids · 26 GCs</span></div>
+  <div class="panel">
+    <div class="panel-title">Active Competitive Relationships <span class="meta">owner-level — relationship-keeping</span></div>
+    <div class="panel-body" style="margin-bottom:10px">
+      26 GCs where SFS wins some bids and loses others. If outreach happens here, it's <b>owner-level</b> — relationship-keeping
+      and improvement calls or dinners with people SFS already has a working relationship with. <em>Not</em> the same kind of
+      conversation as the diagnostic estimator-level calls in Group C.
+    </div>
+    <div style="overflow-x:auto"><table id="groupBTable"></table></div>
+  </div>
+ 
+  <!-- ═══════ GROUP C ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Group C — Zero-win subgroups</span><span class="hint">Estimator-level outreach · 152 GCs · 1,797 bids · 0 historical wins</span></div>
+  <div class="notebox" style="margin-bottom:14px">
+    <b>If anyone reaches out to Group C, it's the estimators — not the owners.</b> The relevant question is <em>why</em>
+    SFS isn't getting bids: incumbent sub? Scope mismatch? Certification barrier? Price? Each subgroup below is a
+    different starting hypothesis for that diagnostic conversation.
+  </div>
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">C-STOP <span class="meta">chain-locked-pattern hypothesis</span></div>
+      <div class="panel-body" style="margin-bottom:8px">
+        ~22 GCs that build almost exclusively for one or two national brands (AutoZone, CVS, Brakes Plus, McDonald's via Morrison).
+        Zero-win history through these GC paths suggests a corporate-locked preferred sub, but estimators would need to confirm.
+        Whether to keep bidding any of them is a judgment call, not a dashboard recommendation.
+      </div>
+      <div style="overflow-x:auto"><table id="groupCStopTable"></table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">C-PUB <span class="meta">certification hypothesis</span></div>
+      <div class="panel-body" style="margin-bottom:8px">
+        25 GCs whose bid stream is dominated by ISD, city, fire-station, and similar public-sector projects. Zero SFS wins.
+        Most natural diagnostic question for an estimator: <em>"Do your projects require HUB/MWBE/bonding certifications we don't hold?"</em>
+      </div>
+      <div style="overflow-x:auto"><table id="groupCPubTable"></table></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">C-MIX <span class="meta">no-clear-pattern · 103 GCs</span></div>
+    <div class="panel-body" style="margin-bottom:10px">
+      GCs with 5+ bids and 0 wins where the job names show no clear structural pattern (Ridgemont 60 bids, Sword 36, HCI 43, …).
+      Why these GCs never award SFS isn't visible in the data — could be incumbent subs, geographic, scope, or pricing.
+      Estimator-level diagnostic call would ask <em>"Who got the work and why?"</em> Showing the top 20 by bid volume.
+    </div>
+    <div style="overflow-x:auto"><table id="groupCMixTable"></table></div>
+  </div>
+ 
+  <!-- ═══════ DATA ARTIFACT ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>Data artifact</span><span class="hint">PlanHub — Knowify reporting quirk</span></div>
+  <div class="panel">
+    <div class="panel-title">PlanHub <span class="meta">excluded from C-STOP totals</span></div>
+    <div class="panel-body">
+      <div id="planhubBlock"></div>
+      <div class="notebox" style="margin-top:10px">
+        <b>Why this isn't a real signal:</b> Won PlanHub bids get renamed to the real GC in Knowify after award.
+        The original "PlanHub" record stays as a loss. So the apparent 0% win rate on PlanHub bids in the raw
+        Knowify export reflects renaming behavior, not real outcomes. Excluded from the C-STOP rollup.
+      </div>
+    </div>
+  </div>
+ 
+  <!-- ═══════ NATIONAL CHAIN BRANDS ═══════ -->
+  <div class="section-label"><span><span class="accent">▸</span>National chain brands</span><span class="hint">Separate dimension — brand names, not GCs</span></div>
+  <div class="panel">
+    <div class="panel-title">Win Path by Brand <span class="meta">which GCs have delivered chain wins, descriptive</span></div>
+    <div class="panel-body" style="margin-bottom:10px">
+      Per-brand bid count, wins, and the specific GCs SFS has won that chain through. Useful as context — Morrison Construction
+      is 0-for-46 on McDonald's, but Stansell delivers wins. Not a "pursue these" list.
+    </div>
+    <div style="overflow-x:auto"><table id="chainTable"></table></div>
+  </div>
+</div>
+ 
+<script>
+function fmt$(n){
+  if (n == null || !isFinite(n)) return '—';
+  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(0) + 'k';
+  return '$' + Math.round(n).toLocaleString();
+}
+function fmtPct(n){ return n == null || !isFinite(n) ? '—' : (typeof n === 'number' ? n.toFixed(1) + '%' : n); }
+const el = id => document.getElementById(id);
+ 
+const GROUP_META = {
+  A:           { tag: 'A',         label: 'Group A',  desc: 'Inelastic — wins held',         cls: 'A',     css: 'A' },
+  B:           { tag: 'B',         label: 'Group B',  desc: 'Active competitive',            cls: 'B',     css: 'B' },
+ 'C-STOP':     { tag: 'C-STOP',    label: 'C-STOP',   desc: 'Chain-locked-pattern',          cls: 'cstop', css: 'cstop' },
+ 'C-PUB':      { tag: 'C-PUB',     label: 'C-PUB',    desc: 'Public-sector zero-win',        cls: 'cpub',  css: 'cpub' },
+ 'C-MIX':      { tag: 'C-MIX',     label: 'C-MIX',    desc: 'Mixed commercial zero-win',     cls: 'cmix',  css: 'cmix' },
+};
+ 
+function renderGroupRow(dist){
+  const order = ['A','B','C-STOP','C-PUB','C-MIX'];
+  const html = order.map(g => {
+    const b = dist[g] || { gcCount:0, bids:0, pending:0, pendingCV:0, wonCV:0, lostCV:0 };
+    const m = GROUP_META[g];
+    return `
+      <div class="group-card ${m.css}">
+        <div class="gc-tag">${m.tag}</div>
+        <div class="gc-name">${m.desc}</div>
+        <div class="gc-stat"><span class="l">GCs</span><span class="v">${b.gcCount}</span></div>
+        <div class="gc-stat"><span class="l">All-time bids</span><span class="v">${b.bids}</span></div>
+        <div class="gc-stat"><span class="l">Pending</span><span class="v">${b.pending}</span></div>
+        <div class="gc-stat"><span class="l">Pending $</span><span class="v">${fmt$(b.pendingCV)}</span></div>
+        <div class="gc-stat"><span class="l">Won $</span><span class="v">${fmt$(b.wonCV)}</span></div>
+      </div>`;
+  }).join('');
+  el('groupRow').innerHTML = html;
+}
+ 
+function makeBarChart(canvasId, labels, values, colors){
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => fmt$(ctx.parsed.y) } },
+      },
+      scales: {
+        x: { ticks: { color: '#8a90a0' }, grid: { display: false } },
+        y: { ticks: { color: '#8a90a0', callback: v => fmt$(v) }, grid: { color: '#252a38' } },
+      },
+    },
+  });
+}
+ 
+function renderCharts(dist){
+  const order = ['A','B','C-STOP','C-PUB','C-MIX'];
+  const colors = ['#3ecf8e','#4a9eff','#e05252','#9b6dff','#e07b2b'];
+  const lblsB = order.map(g => g.replace('C-','C·'));
+  makeBarChart('pendingChart', lblsB, order.map(g => dist[g]?.pendingCV || 0), colors);
+  makeBarChart('wonChart',     lblsB, order.map(g => dist[g]?.wonCV || 0),     colors);
+}
+ 
+function renderGroupTable(tableId, gcs, opts = {}) {
+  const limit = opts.limit || 30;
+  const showWonCV = opts.showWonCV !== false;
+  let html = `<thead><tr>
+    <th>GC</th><th class="num">Bids</th><th class="num">Wins</th><th class="num">Losses</th>
+    <th class="num">Pending</th><th class="num">Pending $</th>
+    ${showWonCV ? '<th class="num">Won $</th>' : ''}
+  </tr></thead><tbody>`;
+  if (!gcs || !gcs.length) {
+    html += `<tr><td class="empty" colspan="${showWonCV ? 7 : 6}">No GCs in this group yet.</td></tr>`;
+  } else {
+    gcs.slice(0, limit).forEach(g => {
+      html += `<tr>
+        <td>${g.gc}</td>
+        <td class="num">${g.bids}</td>
+        <td class="num" style="color:var(--green)">${g.wins}</td>
+        <td class="num" style="color:var(--red)">${g.losses}</td>
+        <td class="num" style="color:var(--yellow)">${g.pending}</td>
+        <td class="num">${fmt$(g.pendingCV)}</td>
+        ${showWonCV ? `<td class="num">${fmt$(g.wonCV)}</td>` : ''}
+      </tr>`;
+    });
+  }
+  html += '</tbody>';
+  el(tableId).innerHTML = html;
+}
+ 
+function renderPlanhub(D){
+  const k = D?.['knowify-jobs'];
+  if (!k?.jobs) { el('planhubBlock').innerHTML = '<div class="empty">No Knowify data.</div>'; return; }
+  const R = applyKnowifyRules(k.jobs);
+  const ph = R.byGC.find(g => /planhub/i.test(g.gc));
+  if (!ph) { el('planhubBlock').innerHTML = '<div class="empty">No PlanHub bids in current Knowify export.</div>'; return; }
+  el('planhubBlock').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div><div class="subtle">All-time bids</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600">${ph.bids}</div></div>
+      <div><div class="subtle">Apparent wins</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600">${ph.wins}</div></div>
+      <div><div class="subtle">Apparent losses</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600">${ph.losses}</div></div>
+      <div><div class="subtle">Pending</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600">${ph.pending}</div></div>
+    </div>`;
+}
+ 
+function renderChains(){
+  const chains = (window.NATIONAL_CHAINS || []);
+  if (!chains.length) { el('chainTable').innerHTML = '<tr><td class="empty" colspan="5">No chain data loaded.</td></tr>'; return; }
+  let html = `<thead><tr>
+    <th>Brand</th><th class="num">Bids</th><th class="num">Wins</th><th class="num">Win Rate</th>
+    <th>Won through (winning GC paths)</th>
+  </tr></thead><tbody>`;
+  chains.forEach(c => {
+    html += `<tr>
+      <td>${c.brand}</td>
+      <td class="num">${c.bids}</td>
+      <td class="num" style="color:${c.wins>0 ? 'var(--green)':'var(--txt-muted)'}">${c.wins}</td>
+      <td class="num">${c.wr}</td>
+      <td style="font-size:11.5px">${c.wonThrough || '—'}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  el('chainTable').innerHTML = html;
+}
+ 
+function render(D){
+  if (!D?.['knowify-jobs']?.jobs) {
+    document.querySelector('.main').insertAdjacentHTML('afterbegin',
+      '<div class="page-note" style="border-color:var(--red)">No Knowify pipeline data loaded. Upload via Admin first.</div>');
+    return;
+  }
+  const dist = bidDistributionByGroup(D);
+  if (!dist) return;
+  renderGroupRow(dist);
+  renderCharts(dist);
+  renderGroupTable('groupATable',     dist.A?.sampleGCs);
+  renderGroupTable('groupBTable',     dist.B?.sampleGCs);
+  renderGroupTable('groupCStopTable', dist['C-STOP']?.sampleGCs, { limit: 15 });
+  renderGroupTable('groupCPubTable',  dist['C-PUB']?.sampleGCs,  { limit: 15 });
+  renderGroupTable('groupCMixTable',  dist['C-MIX']?.sampleGCs,  { limit: 20 });
+  renderPlanhub(D);
+  renderChains();
+}
+ 
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof renderNav === 'function') renderNav('outreach');
+  if (typeof loadDashboard === 'function') {
+    loadDashboard(D => { try { render(D); } catch(e){ console.error(e); } });
+  }
+});
+</script>
+</body>
+</html>
