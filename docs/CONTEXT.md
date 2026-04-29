@@ -145,6 +145,35 @@ for the previous fall's work.
 For dashboard interpretation: Q1 revenue should be expected to be
 the smallest quarter, Q3 the biggest. A "down" January isn't a problem;
 a down July would be.
+Partial-year (YTD) handling — strict rule for all reports. Because
+of this seasonality, any comparison of a partial year against a full
+year is wrong. Specifically:
+
+Never band a partial-year ratio (GM%, NM%, OpEx-as-%-of-revenue,
+revenue-per-labor-$, DSCR) against industry medians. Those medians
+assume a full-year denominator.
+Never compute YoY revenue or YoY anything by comparing
+CY-YTD-through-N-months to PY full-year. Compare CY YTD to PY
+same N months. The helpers ytdVsPriorSamePeriod() and
+seasonalRevenueCompare() do this correctly.
+In charts that span years: the partial year can be plotted
+alongside complete years, but should be visually demoted (greyed
+bars, dashed line segments, hollow markers, "(YTD through Apr)"
+axis label). It must not look like a peer of the full-year points.
+For ratio-based insights (generateInsights() margin/labor/
+OpEx checks): use _latestAnnualPL(D) (which returns the latest
+complete year only) and completeYears(D) (which excludes any
+partial year). Never feed qbo-pl_all years directly into a band
+comparison without checking _yearStatus(D, year).complete.
+YTD context is still useful — show the current-YTD slice next
+to the prior-year same-N-months slice as a "where we are right
+now" panel, with the explicit caveat that partial-year ratios
+aren't graded against full-year medians. The Insights and PL pages
+use this pattern.
+
+If a future Claude is tempted to add a "2026 net margin is 1.4% —
+below industry median" alarm, that's the bug. Check _yearStatus()
+first.
 2.5 Customer/GC segmentation — the Group A/B/C framework
 Important: This section is a segmentation, not an action plan.
 Dylan ran a pricing-sensitivity analysis on the full 8,349-record
