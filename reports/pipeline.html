@@ -33,11 +33,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=12"></script>
-<script src="../core/utils.js?v=12"></script>
-<script src="../core/gc-segmentation.js?v=12"></script>
-<script src="../core/dash.js?v=12"></script>
-<script src="../core/nav.js?v=12"></script>
+<script src="../core/firebase.js?v=13"></script>
+<script src="../core/utils.js?v=13"></script>
+<script src="../core/gc-segmentation.js?v=13"></script>
+<script src="../core/dash.js?v=13"></script>
+<script src="../core/nav.js?v=13"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -446,22 +446,60 @@ function render(D){
     return;
   }
   const R = applyKnowifyRules(k.jobs);
-  renderKPIs(R);
-  renderForecast(R);
-  renderVelocity(D);
-  renderFunnel(R);
-  renderCVChart(R);
-  renderGCTable(R);
-  renderGroupDist(D);
-  renderLeadTable(R);
-  renderQuality(R);
-  renderRelationship(R);
+  // Each section is best-effort — if one renderXxx throws (e.g., missing
+  // dash.js helper, bad data shape), the others still run and the user
+  // sees what *can* render plus a per-section error pill.
+  const safe = (name, fn) => {
+    try { fn(); }
+    catch (e) {
+      console.error(`[${name}]`, e);
+      const targets = {
+        renderKPIs: 'kpiRow', renderForecast: 'forecastBlock',
+        renderVelocity: 'velocityBlock', renderFunnel: 'funnelStats',
+        renderGCTable: 'gcTable', renderLeadTable: 'leadTable',
+        renderGroupDist: 'groupDistTable',
+      };
+      const id = targets[name];
+      if (id) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = `<div class="empty" style="color:var(--red)">${name} failed: ${e.message}</div>`;
+      }
+    }
+  };
+  safe('renderKPIs',         () => renderKPIs(R));
+  safe('renderForecast',     () => renderForecast(R));
+  safe('renderVelocity',     () => renderVelocity(D));
+  safe('renderFunnel',       () => renderFunnel(R));
+  safe('renderCVChart',      () => renderCVChart(R));
+  safe('renderGCTable',      () => renderGCTable(R));
+  safe('renderGroupDist',    () => renderGroupDist(D));
+  safe('renderLeadTable',    () => renderLeadTable(R));
+  safe('renderQuality',      () => renderQuality(R));
+  safe('renderRelationship', () => renderRelationship(R));
 }
  
+// Surface any render failure visibly so the page doesn't go blank.
+function _showRenderError(err) {
+  const main = document.querySelector('.main') || document.body;
+  const div = document.createElement('div');
+  div.className = 'page-note';
+  div.style.borderLeftColor = 'var(--red)';
+  div.style.background = 'rgba(224,82,82,.08)';
+  div.innerHTML = `<b style="color:var(--red)">Render error:</b> ${(err && err.message) ? err.message : err}<br>
+    <span style="font-size:11px;color:var(--txt-muted);font-family:var(--font-mono)">${(err && err.stack) ? String(err.stack).split('\n').slice(0,3).join(' · ') : ''}</span>`;
+  main.insertBefore(div, main.firstChild);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Nav styles must be injected BEFORE renderNav so the header is visible.
+  if (typeof injectNavStyles === 'function') injectNavStyles();
   if (typeof renderNav === 'function') renderNav('pipeline');
+  if (typeof setupChartTheme === 'function') setupChartTheme();
   if (typeof loadDashboard === 'function') {
-    loadDashboard(D => { try { render(D); } catch(e){ console.error(e); } });
+    loadDashboard(D => {
+      try { render(D); }
+      catch(e) { console.error(e); _showRenderError(e); }
+    });
   }
 });
 </script>
