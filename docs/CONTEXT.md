@@ -145,7 +145,60 @@ for the previous fall's work.
 For dashboard interpretation: Q1 revenue should be expected to be
 the smallest quarter, Q3 the biggest. A "down" January isn't a problem;
 a down July would be.
-2.5 SDVOSB / Veteran-Owned Business reality
+2.5 Customer/GC segmentation — the Group A/B/C framework
+Important: This section is a segmentation, not an action plan.
+Dylan ran a pricing-sensitivity analysis on the full 8,349-record
+Knowify history (SFS_Pricing_Report.html, April 2026) that splits
+GCs into descriptive groups by win-rate behavior. The groupings
+themselves are useful — they describe the shape of the bid book —
+but the recommendations the analysis attached to each group
+("dinner with these," "stop bidding those") are analyst suggestions,
+not what SFS is actually going to do. The dashboard surfaces the
+groupings as descriptive context. It does NOT auto-generate to-dos
+of the form "stop bidding GC X" or "redirect Y hours/year." Treat
+those framings with much less weight than the segmentation itself.
+GroupDefinitionWhat the data showsWho reaches outA — Inelastic relationshipsGCs with ≥70% win rate over ≥5 competitive bids. Derived dynamically from Knowify, not hardcoded. ~10 GCs.Won at consistent rates over many bids — relationship is the operative variable, not price.(n/a — already won; just don't let the relationship go quiet)B — Active competitiveGCs with 30–69% win rate over ≥5 bids. 26 GCs.Where pricing/competition signals would live if there were any. Top 4 by won CV: Miller Sierra, DFW Paving, Mycon, Core Construction.Owners. This is relationship-keeping / relationship-improvement work, not estimator follow-up.C-STOP — Chain-locked GCsGCs that build almost exclusively for one or two national brands (AutoZone, CVS, Brakes Plus, McDonald's via Morrison) where the data suggests a corporate-locked preferred sub. ~22 GCs.Zero-win history through these GC paths. Whether to stop bidding is Dylan's call, not the dashboard's.Estimators. Find out why bids aren't winning — is it brand-locked-sub, scope, price? Same kind of "what happened on this loss" call as C-MIX, just with the chain-pattern as a starting hypothesis.C-PUB — Public sector GCsISD, city, fire-station builders (Big Sky, Imperial, Morales, J.B. & Co., …). 25 GCs, 0 SFS wins.Public-sector pattern in job names. Could be a certification barrier, could be incumbent-sub barrier — descriptive only.Estimators. Specifically: ask about HUB/MWBE/bonding requirements.C-MIX — Mixed commercial, zero-winGCs with 5+ bids and 0 wins, no visible structural reason (Ridgemont 60 bids, Sword 36, HCI 43, …). 103 GCs.No pattern in job names. Why these GCs never award SFS isn't visible in the data.Estimators. Post-loss call: "who got the work and why?" The answer determines whether the GC is worth continuing to bid.CHAIN (separate dimension)National chain brand names — Starbucks, Costco, Casey's, McDonald's, etc. — independent of the GC. SFS has wins through specific GCs for some chains (Starbucks via Preston Pierce, Costco via Gray, McDonald's via Stansell+CAET).Per-brand win paths exist. Morrison Construction is 0-for-46 on McDonald's; Stansell delivers wins. Useful as context, not a pursuit list.(Mixed — overlaps with whichever GC delivered the win.)
+Role split (important): Group B is owner-level outreach
+(relationship building); Group C is estimator-level outreach
+(diagnostic — why aren't these turning into wins?). They're
+different conversations with different people. Don't conflate them
+in the UI.
+PlanHub — important data caveat. PlanHub appears to show 164 bids
+and 0 wins, but this is a Knowify reporting artifact, not a real
+zero-win pool. PlanHub bids that do win get renamed in Knowify to
+the real GC after award (the original "PlanHub" record stays as the
+loss). So the real win rate through PlanHub isn't measurable from
+this data and the 0% number should be ignored. PlanHub is excluded
+from Group C-STOP in gc-segmentation.js for this reason.
+Source data: SFS_Outreach_Action_List.xlsx, exposed in
+core/gc-segmentation.js. The classification is built per-GC; Group A
+is derived at runtime from applyKnowifyRules().byGC so it stays
+current as bid history accumulates.
+Pricing-floor anchor (FY2025 baseline, important): SFS's
+break-even GP floor is 33.62%. Actual is 37.13%. That's only 3.5pp of
+headroom — narrow enough that any price-cut conversation needs much
+more information about the elasticity than this segmentation alone
+provides. The segmentation is a starting point, not a directive.
+Estimating-effort facts (for record-keeping, not for auto-insights).
+If anyone ever wants to compute "estimating hours by group," the
+inputs are:
+
+~1.5 hrs per estimate is the typical cost (varies with size /
+complexity).
+Multi-GC bids share a single estimate. When the same project is
+bid through multiple GCs simultaneously, only one estimate is
+produced — so per-bid-record hours over-counts effort by the multi-
+GC duplication factor. ~38% of the competitive dataset is multi-GC
+duplicates.
+PlanHub is a data artifact. Its bid count over-states real
+submissions and its 0% win rate is a Knowify renaming artifact, not
+a real outcome. Don't include it in any effort calculation.
+
+The dashboard intentionally does NOT auto-generate "redirect X
+hours/year" recommendations from these numbers. They're documented
+here in case Dylan or a future Claude wants to do the math
+deliberately.
+2.6 SDVOSB / Veteran-Owned Business reality
 SFS holds SDVOSB certification. This means:
 
 Federal goal: the federal government targets 5% of all contracting
@@ -264,7 +317,14 @@ Pricing — bid markups, contract terms (informally)
 Cost discipline — OpEx categories, vendor selection
 Crew/capacity — hiring, training, equipment investment
 Service mix — which kinds of work to lean into
-Bid response — speed, quality of bid prep (volume is fixed: SFS bids every job they can)
+Bid response — speed, quality of bid prep
+(Possible — descriptive, not auto-actioned) Bid-acceptance triage —
+the §2.5 segmentation describes which GCs have shown what win
+history. Whether to keep bidding any specific GC is Dylan's call.
+The dashboard surfaces the groupings; it does NOT generate
+recommendations like "stop bidding GC X" or "save Y hours/year."
+Treat the analyst-suggested actions with significantly less weight
+than the segmentation data itself.
 
 What SFS does NOT control (don't generate "do X" insights here):
 
@@ -273,12 +333,14 @@ aging, DSO trends, "slow payer" callouts are informational only.
 Reports can show them descriptively but should not frame them as
 to-dos. Dylan: "We can't control when ARs get paid, so focusing on
 that will do nothing."
-Which GCs win primes — SFS bids every job they can. "Pursue this
-GC" recommendations are useless. Dylan: "We will be doing every bid
-we can already." GC win-rate breakdowns are diagnostic (predicting
-cash and capacity), not prescriptive (don't say "focus on GC X").
-Customer relationships at scale — same logic. Customer-by-customer
-views are descriptive context, not action items.
+Which GCs win primes — that's the GC's customer's choice. SFS's
+win rate is per-GC-bid, not per-prime-award. GC win-rate breakdowns
+are diagnostic (predicting cash and capacity), not prescriptive at
+the level of "which prime contracts to root for."
+Customer relationships at scale — customer-by-customer AR views
+are descriptive context, not action items. (GC relationship
+building with Group B is a controllable; collecting from existing
+customers is not.)
 Cash flow short-term — SBA loan is in progress. Don't harp on
 cash burn or runway. Show debt schedule and equity trajectory; let
 the upcoming loan show up in the financial statements when it lands.
