@@ -587,7 +587,10 @@ function dscr(D) {
  */
 function marginErosion(D) {
   const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  // Complete years only — comparing partial-year OpEx to a full year
+  // would falsely flag every fixed-cost category as "growing as % of
+  // revenue" because of seasonal denominator suppression.
+  const years = completeYears(D);
   if (years.length < 2) return null;
   const latest = all[years[years.length - 1]];
   const prior  = all[years[years.length - 2]];
@@ -723,7 +726,11 @@ function cashFlowConversion(D) {
 }
  
 /**
- * Revenue YoY growth rates across all available years.
+ * Revenue YoY growth rates across all available years. Each row is
+ * tagged with `isComplete` so reports can render partial-year bars
+ * differently (greyed, hatched, footnoted) instead of treating a YTD
+ * data point as a real annual number. Don't suppress the partial year
+ * outright — it's useful to see, just labeled.
  */
 function revenueGrowth(D) {
   const all = D['qbo-pl_all'] || {};
@@ -731,17 +738,23 @@ function revenueGrowth(D) {
   return years.map((y, i) => {
     const rev = all[y].revenue || 0;
     const prior = i > 0 ? (all[years[i - 1]].revenue || 0) : null;
+    const status = _yearStatus(D, y);
     return {
       year: y,
       revenue: rev,
       yoyPct: prior ? +(((rev - prior) / prior) * 100).toFixed(1) : null,
+      isComplete: status.complete,
+      monthsCovered: status.monthsCovered,
+      monthName: status.monthName,
     };
   });
 }
  
 /**
- * Cost line items as % of revenue, year by year. Surfaces creeping cost
- * ratios. Returns categoryTrend[catName] → [{year, pctOfRevenue}, …].
+ * Cost line items as % of revenue, year by year. Each year row is
+ * tagged isComplete; partial years should not be banded against full-
+ * year industry medians (the ratio's denominator is suppressed by
+ * seasonality).
  */
 function opexTrend(D) {
   const all = D['qbo-pl_all'] || {};
@@ -754,7 +767,12 @@ function opexTrend(D) {
       const opex = all[y].opex || {};
       const amt = opex[cat] || 0;
       const rev = all[y].revenue || 0;
-      return { year: y, amt, pctOfRevenue: rev ? +(amt / rev * 100).toFixed(2) : null };
+      const status = _yearStatus(D, y);
+      return {
+        year: y, amt,
+        pctOfRevenue: rev ? +(amt / rev * 100).toFixed(2) : null,
+        isComplete: status.complete,
+      };
     });
   });
   return out;
@@ -878,7 +896,10 @@ function seasonalRevenueCompare(D) {
  */
 function costProductivity(D) {
   const all = D?.['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  // Use only complete years — comparing 2026-YTD to full 2025 would make
+  // every fixed-cost category look like a creep due to seasonality of
+  // revenue (the denominator). See CONTEXT.md §2.4.
+  const years = completeYears(D);
   if (years.length < 2) return null;
   const cy = years[years.length - 1], py = years[years.length - 2];
   const latest = all[cy], prior = all[py];
@@ -1130,48 +1151,73 @@ function generateInsights(D) {
   const out = [];
  
   // ── 1. Net margin (pricing/cost discipline — internal lever) ─────
+  // Banded against industry medians — ONLY fire on complete-year data.
+  // Comparing partial-year (YTD) net margin to a full-year industry
+  // median is wrong: TX striping is heavily seasonal (CONTEXT.md §2.4),
+  // so YTD revenue is suppressed against fixed OpEx and the ratio looks
+  // worse than reality. _latestAnnualPL() already returns the latest
+  // *complete* year only.
   const pl = _latestAnnualPL(D);
   if (pl?.netMarginPct != null) {
     const m = pl.netMarginPct;
+    const yr = pl._year || '';
     if (m < BANDS.netMargin.weak) {
       out.push({
         id: 'net-margin-weak', category: 'margin', severity: 'warning',
-        title: `Net margin ${m.toFixed(1)}% — below industry median`,
-        message: `Construction-subcontractor peers run 5-10% net median; top decile >20%. Last full year landed at ${m.toFixed(1)}%.`,
+        title: `Net margin ${m.toFixed(1)}% (${yr}) — below industry median`,
+        message: `Construction-subcontractor peers run 5-10% net median; top decile >20%. ${yr} (last complete year) landed at ${m.toFixed(1)}%.`,
         value: `${m.toFixed(1)}%`,
         recommendation: 'Two internal levers: bid pricing discipline (industry standard add is 30-40% over cost) and OpEx ratio review (see cost productivity below).',
       });
     } else if (m >= BANDS.netMargin.strong) {
       out.push({
         id: 'net-margin-strong', category: 'margin', severity: 'positive',
-        title: `Net margin ${m.toFixed(1)}% — top-quartile`,
-        message: `Construction-sub peers median 5-10%. SFS at ${m.toFixed(1)}% is top-quartile.`,
+        title: `Net margin ${m.toFixed(1)}% (${yr}) — top-quartile`,
+        message: `Construction-sub peers median 5-10%. SFS in ${yr} at ${m.toFixed(1)}% is top-quartile.`,
         value: `${m.toFixed(1)}%`, recommendation: '',
       });
     }
   }
  
+  // ── 1b. YTD pace (informational — same-period YoY only) ──────────
+  // This is the right way to comment on the partial-year slice. Compare
+  // CY-YTD to PY same months, NOT to PY full year. No band-vs-industry
+  // check here — partial-year ratios aren't comparable to annual medians.
+  const ytd = ytdVsPriorSamePeriod(D);
+  if (ytd && ytd.yoyRevenuePct != null) {
+    const sev = ytd.yoyRevenuePct >= 25 ? 'positive' : ytd.yoyRevenuePct <= -20 ? 'warning' : 'info';
+    out.push({
+      id: 'ytd-pace', category: 'pace', severity: sev,
+      title: `${ytd.year} YTD through ${ytd.monthName}: ${ytd.yoyRevenuePct >= 0 ? '+' : ''}${ytd.yoyRevenuePct}% revenue vs same months ${parseInt(ytd.year,10)-1}`,
+      message: `${fmt(ytd.cy.revenue)} CY-to-date vs ${fmt(ytd.py.revenue)} prior-year same months (${ytd.monthsCovered} months). Compared to the prior-year *same-period*, not the prior-year full total — partial-year vs full-year is apples-to-oranges in TX striping (Q1 normally weakest, Q3 normally strongest; see CONTEXT.md §2.4).`,
+      value: `${ytd.yoyRevenuePct >= 0 ? '+' : ''}${ytd.yoyRevenuePct}%`,
+      recommendation: ytd.yoyRevenuePct < -20 ? 'Don\'t over-react — Q1 is normally the weakest quarter. Re-check after May/June numbers. Same-period comparison is the right frame, not YTD vs PY full-year.' : '',
+    });
+  }
+ 
   // ── 2. Gross margin trajectory (pricing power signal) ────────────
   // Multi-year GM trend tells whether SFS is holding pricing or eroding.
+  // Use ONLY complete years — a partial-year GM% is distorted by seasonal
+  // revenue against fixed costs.
   const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
-  if (years.length >= 3) {
-    const recent = years.slice(-3).map(y => all[y].grossMarginPct).filter(v => v != null);
+  const cYrs = completeYears(D);
+  if (cYrs.length >= 3) {
+    const recent = cYrs.slice(-3).map(y => all[y].grossMarginPct).filter(v => v != null);
     if (recent.length >= 3) {
       const drop = recent[0] - recent[recent.length - 1];
       if (drop > 5) {
         out.push({
           id: 'gm-erosion', category: 'margin', severity: 'warning',
-          title: `Gross margin compressed ${drop.toFixed(1)}pp over 3 years`,
-          message: `${years[years.length-3]}: ${recent[0]}% → ${years[years.length-1]}: ${recent[recent.length-1]}%. Either bid prices haven't kept up with COGS, or the job mix has shifted toward lower-margin work.`,
+          title: `Gross margin compressed ${drop.toFixed(1)}pp over 3 complete years`,
+          message: `${cYrs[cYrs.length-3]}: ${recent[0]}% → ${cYrs[cYrs.length-1]}: ${recent[recent.length-1]}%. Either bid prices haven't kept up with COGS, or the job mix has shifted toward lower-margin work. (Comparison uses complete years only.)`,
           value: `-${drop.toFixed(1)}pp`,
           recommendation: 'Worth a bid-pricing audit on the next 5-10 jobs: what % was added over estimated cost?',
         });
       } else if (drop < -5) {
         out.push({
           id: 'gm-expansion', category: 'margin', severity: 'positive',
-          title: `Gross margin expanded ${Math.abs(drop).toFixed(1)}pp over 3 years`,
-          message: `${years[years.length-3]}: ${recent[0]}% → ${years[years.length-1]}: ${recent[recent.length-1]}%. Pricing or mix improvement is working.`,
+          title: `Gross margin expanded ${Math.abs(drop).toFixed(1)}pp over 3 complete years`,
+          message: `${cYrs[cYrs.length-3]}: ${recent[0]}% → ${cYrs[cYrs.length-1]}: ${recent[recent.length-1]}%. Pricing or mix improvement is working.`,
           value: `+${Math.abs(drop).toFixed(1)}pp`, recommendation: '',
         });
       }
@@ -1208,14 +1254,18 @@ function generateInsights(D) {
   // ── 4. Crew productivity / labor leverage ────────────────────────
   // Revenue ÷ (Wages COGS + Salaries OpEx) tells you how much top-line
   // each labor dollar is producing. Going up = more efficient delivery.
-  if (pl?.revenue) {
+  // BOTH years used here must be complete — labor ratios are seasonal,
+  // so a YTD-vs-full-year compare would falsely show "lower leverage."
+  if (pl?.revenue && cYrs.length >= 2) {
     const wagesCogs = (pl.cogs || {})['Wages_COGS_'] || (pl.cogs || {})['Wages(COGS)'] || 0;
     const salariesOpex = (pl.opex || {})['Salaries___Wages'] || (pl.opex || {})['Salaries & Wages'] || 0;
     const totalLabor = wagesCogs + salariesOpex;
     if (totalLabor > 0) {
       const revPerLabor = pl.revenue / totalLabor;
-      // Compare to prior year if available
-      const priorYr = years[years.length - 2];
+      // Step back one COMPLETE year (cYrs already excludes the partial
+      // current year) — this was previously comparing latest-complete to
+      // itself when a partial year existed in qbo-pl_all.
+      const priorYr = cYrs[cYrs.length - 2];
       const priorPL = priorYr ? all[priorYr] : null;
       let priorRevPerLabor = null;
       if (priorPL?.revenue) {
@@ -1228,9 +1278,9 @@ function generateInsights(D) {
         out.push({
           id: 'labor-leverage', category: 'productivity', severity: deltaPct > 0 ? 'positive' : 'warning',
           title: deltaPct > 0
-            ? `Each labor $ producing ${deltaPct.toFixed(0)}% more revenue YoY`
-            : `Each labor $ producing ${Math.abs(deltaPct).toFixed(0)}% less revenue YoY`,
-          message: `${pl.meta?.period || ''}: $${revPerLabor.toFixed(2)} of revenue per $1 of labor (Wages COGS + Salaries). Prior: $${priorRevPerLabor.toFixed(2)}.`,
+            ? `Each labor $ producing ${deltaPct.toFixed(0)}% more revenue (${pl._year} vs ${priorYr})`
+            : `Each labor $ producing ${Math.abs(deltaPct).toFixed(0)}% less revenue (${pl._year} vs ${priorYr})`,
+          message: `${pl._year}: $${revPerLabor.toFixed(2)} of revenue per $1 of labor (Wages COGS + Salaries). ${priorYr}: $${priorRevPerLabor.toFixed(2)}. Comparison uses complete years only.`,
           value: `$${revPerLabor.toFixed(2)}/$1`,
           recommendation: deltaPct > 0
             ? ''
@@ -1240,24 +1290,9 @@ function generateInsights(D) {
     }
   }
  
-  // ── 5. Seasonal pace (this year vs same months last year) ────────
-  // Tells Dylan whether the current year is on/off track relative to
-  // the seasonal expectation. Q1 is normally weakest in TX striping.
-  const season = seasonalRevenueCompare(D);
-  if (season?.months?.length) {
-    const lastMonth = season.months[season.months.length - 1];
-    if (lastMonth.ytdYoyPct != null && Math.abs(lastMonth.ytdYoyPct) > 10) {
-      const yoy = lastMonth.ytdYoyPct;
-      const sev = yoy > 25 ? 'positive' : yoy < -20 ? 'warning' : 'info';
-      out.push({
-        id: 'seasonal-pace', category: 'pace', severity: sev,
-        title: `${season.currentYear} YTD pacing ${yoy >= 0 ? '+' : ''}${yoy}% vs ${season.priorYear} same months`,
-        message: `Through ${lastMonth.name}: ${fmt(lastMonth.ytdSamePeriodCY)} this year vs ${fmt(lastMonth.ytdSamePeriodPY)} the same months last year.`,
-        value: `${yoy >= 0 ? '+' : ''}${yoy}%`,
-        recommendation: yoy < -20 ? 'Q1 is normally weakest in TX striping (April-Nov is peak); a Q1 dip alone may just be timing. Re-check after May/June numbers.' : '',
-      });
-    }
-  }
+  // (Insight 5 was an older seasonal-pace based on sales-by-customer
+  // monthly data; the new YTD-pace insight at §1b above replaces it
+  // using the higher-precision monthly P&L feed. Don't double-report.)
  
   // ── 6. Pipeline forecast (forward visibility — operational) ──────
   const proj = pipelineProjection(D);
@@ -1307,18 +1342,162 @@ function generateInsights(D) {
 // SECTION 6 ─ HELPERS
 // ════════════════════════════════════════════════════════════════════════
  
-/** Helper used by several metrics — get the latest annual P&L (not YTD). */
-function _latestAnnualPL(D) {
-  const all = D['qbo-pl_all'] || {};
-  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
-  // Prefer the second-to-last if the last is current year (likely YTD).
-  // But if there's only one year, take it.
-  if (years.length === 0) return null;
-  const currentYr = String(new Date().getFullYear());
-  if (years[years.length - 1] === currentYr && years.length > 1) {
-    return all[years[years.length - 2]];
+// ─────────────────────────────────────────────────────────────────────────
+// PARTIAL-YEAR HELPERS (CONTEXT.md §2.4 — TX striping is heavily seasonal,
+// so any YTD-vs-full-year comparison or industry-band check on partial-year
+// data is wrong. These helpers let metrics distinguish complete years from
+// the current YTD slice and only band complete years against industry
+// medians.)
+// ─────────────────────────────────────────────────────────────────────────
+ 
+/**
+ * Detect whether a year is complete based on the monthly P&L feed.
+ * If qbo-pl-monthly's meta.year matches and only N of 12 months have
+ * non-zero revenue, the year is partial (N months covered).
+ *
+ * Returns: { complete:true, monthsCovered:12 } for any non-current year,
+ * or { complete:false, monthsCovered:N, monthName:'April' } for the
+ * current year if monthly data shows < 12 months populated.
+ */
+function _yearStatus(D, yearKey) {
+  if (!yearKey) return { complete: false, monthsCovered: 0 };
+  const monthly = D?.['qbo-pl-monthly'];
+  // If the monthly feed doesn't match this year, treat as complete (best
+  // we can do — fall back to "assume complete" rather than over-flagging).
+  if (!monthly?.meta?.year || String(monthly.meta.year) !== String(yearKey)) {
+    return { complete: true, monthsCovered: 12, year: yearKey };
   }
-  return all[years[years.length - 1]];
+  const months = monthly.revenue?.months || [];
+  const headers = monthly.meta.monthHeaders || [];
+  // Count months with any signal (revenue OR cost) — defensive against a
+  // weird month with $0 revenue but real expenses.
+  const cogsM = monthly.cogs?.months || [];
+  const opexM = monthly.opex?.months || [];
+  let lastIdx = -1;
+  for (let i = 0; i < 12; i++) {
+    const r = months[i] || 0, c = cogsM[i] || 0, o = opexM[i] || 0;
+    if (r !== 0 || c !== 0 || o !== 0) lastIdx = i;
+  }
+  const covered = lastIdx + 1;
+  return {
+    complete: covered === 12,
+    monthsCovered: covered,
+    monthName: covered > 0 ? (headers[lastIdx] || `M${covered}`) : null,
+    year: yearKey,
+  };
+}
+ 
+/**
+ * Returns the sorted year keys for which the year is complete (≥ 12
+ * months covered). The current calendar year is excluded if it shows
+ * < 12 months in qbo-pl-monthly. Use this anywhere you would compute
+ * margin trajectories, OpEx % trends, or labor leverage YoY — those
+ * comparisons all break on partial-year data.
+ */
+function completeYears(D) {
+  const all = D?.['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  return years.filter(y => _yearStatus(D, y).complete);
+}
+ 
+/**
+ * Returns whichever year keys exist in qbo-pl_all, paired with their
+ * status. Lets reports differentiate complete bars from partial ones
+ * in charts (greying or footnoting).
+ */
+function yearStatusList(D) {
+  const all = D?.['qbo-pl_all'] || {};
+  const years = Object.keys(all).filter(k => /^\d{4}$/.test(k)).sort();
+  return years.map(y => Object.assign({}, _yearStatus(D, y), { year: y }));
+}
+ 
+/**
+ * Helper used by several metrics — get the latest *complete* annual P&L
+ * (never YTD). If the current year's qbo-pl-monthly shows < 12 months
+ * covered, that year is skipped. Returns null if no complete year
+ * exists (very fresh accounts).
+ *
+ * The returned object is the qbo-pl_all entry as-is, plus a non-
+ * enumerable `_year` property for callers that need to know which
+ * year they got.
+ */
+function _latestAnnualPL(D) {
+  const all = D?.['qbo-pl_all'] || {};
+  const cYrs = completeYears(D);
+  if (cYrs.length === 0) return null;
+  const yr = cYrs[cYrs.length - 1];
+  const out = Object.assign({}, all[yr]);
+  Object.defineProperty(out, '_year', { value: yr, enumerable: false });
+  return out;
+}
+ 
+/**
+ * YTD-versus-prior-year-same-period — the right way to compare partial-
+ * year data. Sums the current YTD revenue/cogs/opex from qbo-pl-monthly
+ * and the SAME number of months from the prior year (using qbo-sales
+ * monthlyByYear for revenue and qbo-pl-monthly for the current year
+ * comparison). Returns null if we don't have enough data to do the
+ * comparison fairly.
+ *
+ * Output: {
+ *   year, monthsCovered, monthName,                        // e.g. 'April'
+ *   cy: { revenue, cogs?, opex?, grossMarginPct?, netMarginPct? },
+ *   py: { revenue, … same shape, but ONLY the same N months },
+ *   yoyRevenuePct,                                          // %
+ * }
+ *
+ * IMPORTANT: For ratio metrics like gross margin %, only revenue
+ * comparisons (which we have at month-grain in qbo-sales monthlyByYear)
+ * are reliable. Cost categories may not be available month-by-month for
+ * prior years, in which case those fields are null — DO NOT fall back
+ * to PY-full-year for those, as that's the bug this helper exists to
+ * prevent.
+ */
+function ytdVsPriorSamePeriod(D) {
+  const monthly = D?.['qbo-pl-monthly'];
+  const monthlyByYear = D?.['qbo-sales']?.monthlyByYear;
+  if (!monthly?.meta?.year || !monthly?.revenue?.months) return null;
+ 
+  const year = String(monthly.meta.year);
+  const status = _yearStatus(D, year);
+  if (!status.monthsCovered) return null;
+ 
+  const N = status.monthsCovered;
+  const monthsCY = monthly.revenue.months.slice(0, N);
+  const cogsCY   = (monthly.cogs?.months || []).slice(0, N);
+  const opexCY   = (monthly.opex?.months || []).slice(0, N);
+  const sum = arr => arr.reduce((s, v) => s + (v || 0), 0);
+ 
+  const cyRev  = sum(monthsCY);
+  const cyCogs = sum(cogsCY);
+  const cyOpex = sum(opexCY);
+ 
+  const cy = {
+    revenue: cyRev,
+    cogs:    cyCogs,
+    opex:    cyOpex,
+    grossMarginPct: cyRev ? +((cyRev - cyCogs) / cyRev * 100).toFixed(2) : null,
+    netMarginPct:   cyRev ? +((cyRev - cyCogs - cyOpex) / cyRev * 100).toFixed(2) : null,
+  };
+ 
+  // Build PY-same-period from monthlyByYear (revenue only — that's what
+  // qbo-sales gives us). PY cost data at month-grain isn't available, so
+  // grossMarginPct/netMarginPct on the PY side are intentionally null.
+  let py = null, yoyRevenuePct = null;
+  const priorYear = String(parseInt(year, 10) - 1);
+  const priorRow = monthlyByYear?.[priorYear];
+  if (priorRow && priorRow.length >= N) {
+    const pyRev = sum(priorRow.slice(0, N));
+    py = { revenue: pyRev, grossMarginPct: null, netMarginPct: null };
+    yoyRevenuePct = pyRev ? +(((cyRev - pyRev) / pyRev) * 100).toFixed(1) : null;
+  }
+ 
+  return {
+    year,
+    monthsCovered: N,
+    monthName: status.monthName,
+    cy, py, yoyRevenuePct,
+  };
 }
  
  
