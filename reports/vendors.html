@@ -1,110 +1,77 @@
 <!DOCTYPE html>
+<!--
+  Vendors & AP — informational, with SBA-loan context.
+ 
+  ▶ Read docs/CONTEXT.md §2.1 (AP differs from AR) and §8.0 before editing.
+ 
+    AP "past due" framing IS appropriate here — vendors have enforceable
+    terms unlike SFS's customers — but the cash flow constraints are
+    being addressed by the SBA loan in progress. So:
+    • Show buckets honestly (current / 1–30 / 31–60 / 61–90 / 91+).
+    • Don't generate "pay these vendors" alarms or red-color the
+      Past-Due % KPI.
+    • Pair the AP picture with the SBA-loan-pending caveat.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFS — Vendors & AP</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../core/styles.css?v=11">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js"></script>
-<script src="../core/utils.js"></script>
-<script src="../core/dash.js"></script>
-<script src="../core/nav.js"></script>
-<style>
-:root{
-  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
-  --border:#252a38;--border-bright:#2e3448;
-  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
-  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
-  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
-}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
-a{color:inherit;text-decoration:none}
-
-.main{padding:24px 28px;max-width:1700px;margin:0 auto}
-.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
-.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:24px}
-.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px}
-.section-label .accent{color:var(--yellow);margin-right:6px}
-
-.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
-.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
-.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
-.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
-.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1}
-.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
-.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.orange{color:var(--orange)}.kpi-value.blue{color:var(--blue)}
-
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-
-.panel{background:var(--bg-card);border:1px solid var(--border);padding:18px}
-.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono)}
-
-.t{width:100%;border-collapse:collapse;font-size:12px}
-.t th{text-align:left;padding:7px 8px;font-family:var(--font-display);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-muted);border-bottom:2px solid var(--border-bright);position:sticky;top:0;background:var(--bg-card)}
-.t td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--txt-secondary);vertical-align:middle}
-.t td.num{font-family:var(--font-mono);text-align:right;color:var(--txt-primary);white-space:nowrap}
-.t tr:hover{background:var(--bg-hover)}
-.t-scroll{max-height:560px;overflow-y:auto;background:var(--bg-card)}
-
-.aging-row{display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:10px;padding:6px 0;font-size:13px}
-.aging-row .label{color:var(--txt-secondary);font-family:var(--font-display);text-transform:uppercase;font-size:11px;letter-spacing:.06em}
-.aging-row .bar{height:18px;background:var(--bg-hover);border:1px solid var(--border)}
-.aging-row .bar-fill{height:100%}
-.aging-row .val{font-family:var(--font-mono);text-align:right;color:var(--txt-primary)}
-
-.note{background:rgba(74,158,255,.06);border-left:2px solid var(--blue);padding:10px 14px;font-size:12px;color:var(--txt-secondary);margin-bottom:14px;line-height:1.5}
-.note strong{color:var(--blue)}
-
-.empty-state{text-align:center;padding:48px 20px;color:var(--txt-muted);font-size:13px}
-.empty-state a{color:var(--yellow)}
-</style>
+<script src="../core/firebase.js?v=11"></script>
+<script src="../core/utils.js?v=11"></script>
+<script src="../core/dash.js?v=11"></script>
+<script src="../core/nav.js?v=11"></script>
 </head>
 <body>
 <main class="main">
   <div class="page-title">Vendors & AP</div>
   <div class="page-sub">Accounts payable aging, top vendors, payable trends.</div>
-
-  <div class="note">
-    <strong>How AP differs from AR:</strong> these are bills <em>SFS</em> needs to pay. Past-due here is more meaningful than for AR — vendors expect payment per their terms, and being late hurts the relationship. Watch the 31-60+ buckets and the long-term Notes Payable schedule on the Cash page.
+ 
+  <div class="page-note blue">
+    <b>How AP differs from AR:</b> these are bills SFS needs to pay. Past-due here is more meaningful than for AR
+    — vendors expect payment per their terms. <b>However</b>, current cash constraints are being addressed by the
+    SBA loan in progress (CONTEXT.md §8.0), so this page intentionally <em>doesn't</em> generate "pay these now"
+    alarms. Watch the 31–60+ buckets and the long-term Notes Payable schedule on the Cash page; revisit framing
+    once the loan funds.
   </div>
-
+ 
   <div id="empty-state" class="empty-state" style="display:none">
     No vendor data yet. Go to <a href="../admin.html">Admin</a> and upload an A/P Aging Summary.
   </div>
-
+ 
   <div id="content" style="display:none">
-    <div class="kpi-row" id="kpi-row"></div>
-
+    <div class="kpi-row cols-5" id="kpi-row"></div>
+ 
     <div class="grid-2">
       <div class="panel">
         <div class="panel-title"><span>AP Aging Buckets</span><span class="meta" id="ap-asof">—</span></div>
         <div id="aging-block"></div>
       </div>
       <div class="panel">
-        <div class="panel-title"><span>AP Trend Across Snapshots</span><span class="meta">All uploads</span></div>
-        <div style="position:relative;width:100%;height:260px"><canvas id="chart-ap-trend"></canvas></div>
+        <div class="panel-title"><span>AP Trend Across Snapshots</span><span class="meta">all uploads</span></div>
+        <div class="chart-wrap h260"><canvas id="chart-ap-trend"></canvas></div>
       </div>
     </div>
-
-    <div class="section-label"><span><span class="accent">▸</span> Top Vendors</span></div>
-    <div class="panel" style="padding:0">
-      <div class="t-scroll"><table class="t" id="t-vendors"><thead><tr><th>#</th><th>Vendor</th><th>Total AP</th><th>Current</th><th>1-30</th><th>31-60</th><th>61-90</th><th>91+</th></tr></thead><tbody></tbody></table></div>
+ 
+    <div class="section-label"><span><span class="accent">▸</span>Top Vendors</span></div>
+    <div class="panel flush">
+      <div class="t-scroll"><table class="t" id="t-vendors"><thead><tr><th>#</th><th>Vendor</th><th class="num">Total AP</th><th class="num">Current</th><th class="num">1–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">91+</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </main>
-
+ 
 <script>
 injectNavStyles();
 renderNav('vendors');
 setupChartTheme();
-
+ 
 let charts = {};
-
+ 
 loadDashboard((D, raw) => {
   const ap = D?.['qbo-ap-aging'];
   if (!ap || !ap.summary) {
@@ -114,42 +81,45 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
-
+ 
   renderKPIs(D);
   renderAgingBlock(ap);
   renderAPTrend(D);
   renderVendorsTable(ap);
 });
-
+ 
 function renderKPIs(D) {
   const ap = D['qbo-ap-aging'];
   const bs = D['qbo-bs'] || {};
   const total = ap.summary?.total || 0;
   const pastDuePct = ap.pastDuePct || 0;
-  const kpis = [
-    { label: 'Total AP', value: fmtK(total), color: 'orange', sub: `${ap.meta?.vendorCount || 0} vendors` },
-    { label: 'Current', value: fmtK(ap.summary?.current), color: 'green', sub: total ? ((ap.summary.current/total*100).toFixed(0) + '% of total') : '' },
-    { label: 'Past Due', value: pastDuePct + '%', color: pastDuePct > 30 ? 'red' : pastDuePct > 15 ? 'orange' : 'green', sub: fmtK(ap.pastDue) + ' past due' },
-    { label: '91+ Days', value: fmtK(ap.summary?.days91_plus), color: ap.summary?.days91_plus > 0 ? 'red' : 'green', sub: total ? ((ap.summary.days91_plus/total*100).toFixed(0) + '%') : '' },
-    { label: 'AP on BS', value: fmtK(bs.ap), color: 'orange', sub: 'From latest balance sheet' },
-  ];
-  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
-    <div class="kpi" style="--kpi-color:var(--${k.color})">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value ${k.color}">${k.value}</div>
-      <div class="kpi-sub">${k.sub || '&nbsp;'}</div>
-    </div>`).join('');
+  const kpi = (label, value, opts = {}) => `
+    <div class="kpi" style="--kpi-color:var(--${opts.color || 'border-bright'})">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${opts.color || ''}">${value}</div>
+      <div class="kpi-sub">${opts.sub || '&nbsp;'}</div>
+    </div>`;
+  // No alarm coloring on the past-due KPI per §8.0 — the loan handles cash.
+  document.getElementById('kpi-row').innerHTML = [
+    kpi('Total AP', fmtK(total), { color: 'orange', sub: `${ap.meta?.vendorCount || 0} vendors` }),
+    kpi('Current', fmtK(ap.summary?.current), { color: 'green', sub: total ? ((ap.summary.current/total*100).toFixed(0) + '% of total') : '' }),
+    kpi('Past Due %', pastDuePct + '%', { color: 'orange', sub: fmtK(ap.pastDue) + ' past due' }),
+    kpi('91+ Days', fmtK(ap.summary?.days91_plus), { color: 'orange', sub: total ? ((ap.summary.days91_plus/total*100).toFixed(0) + '% of total') : '' }),
+    kpi('AP on BS', fmtK(bs.ap), { color: 'orange', sub: 'from latest balance sheet' }),
+  ].join('');
 }
-
+ 
 function renderAgingBlock(ap) {
   document.getElementById('ap-asof').textContent = ap.meta?.period || '—';
   const total = ap.summary?.total || 0;
+  // Bucket colors — neutral gradient, not alarm. Vendors getting paid late
+  // is not a thing the dashboard is going to fix; the SBA loan will.
   const buckets = [
     ['Current',     ap.summary.current,     'var(--green)'],
     ['1 – 30 days', ap.summary.days1_30,    'var(--yellow)'],
     ['31 – 60 days',ap.summary.days31_60,   'var(--orange)'],
     ['61 – 90 days',ap.summary.days61_90,   'var(--orange)'],
-    ['91+ days',    ap.summary.days91_plus, 'var(--red)'],
+    ['91+ days',    ap.summary.days91_plus, 'var(--orange)'],
   ];
   document.getElementById('aging-block').innerHTML = buckets.map(([label, val, color]) => {
     const pct = total ? (val / total * 100).toFixed(1) : 0;
@@ -160,7 +130,7 @@ function renderAgingBlock(ap) {
     </div>`;
   }).join('');
 }
-
+ 
 function renderAPTrend(D) {
   const all = D['qbo-ap-aging_all'] || {};
   const dates = Object.keys(all).sort();
@@ -173,14 +143,14 @@ function renderAPTrend(D) {
   charts.apt = new Chart(ctx, {
     type: 'line',
     data: { labels: dates, datasets: [
-      { label: 'Total AP',  data: dates.map(d => all[d].summary?.total || 0),       borderColor: CHART_COLORS.orange, backgroundColor: CHART_COLORS.orange + '22', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true },
-      { label: 'Past Due',  data: dates.map(d => all[d].pastDue || 0),              borderColor: CHART_COLORS.red, tension: 0.2, borderWidth: 2, pointRadius: 3 },
+      { label: 'Total AP', data: dates.map(d => all[d].summary?.total || 0), borderColor: CHART_COLORS.orange, backgroundColor: CHART_COLORS.orange + '22', tension: 0.2, borderWidth: 2, pointRadius: 3, fill: true },
+      { label: 'Past Due', data: dates.map(d => all[d].pastDue || 0),       borderColor: CHART_COLORS.yellow, tension: 0.2, borderWidth: 2, pointRadius: 3 },
     ] },
     options: { responsive: true, maintainAspectRatio: false,
       scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'K' } } } },
   });
 }
-
+ 
 function renderVendorsTable(ap) {
   const tbody = document.querySelector('#t-vendors tbody');
   if (!ap.vendors || ap.vendors.length === 0) {
@@ -189,14 +159,14 @@ function renderVendorsTable(ap) {
   }
   tbody.innerHTML = ap.vendors.map((v, i) => `
     <tr>
-      <td style="color:var(--txt-muted)">${i + 1}</td>
+      <td class="muted">${i + 1}</td>
       <td><strong>${v.name}</strong></td>
       <td class="num">${fmt(v.total)}</td>
-      <td class="num" style="color:var(--green)">${fmt(v.current)}</td>
+      <td class="num green">${fmt(v.current)}</td>
       <td class="num">${fmt(v.days1_30)}</td>
-      <td class="num" style="color:var(--orange)">${fmt(v.days31_60)}</td>
-      <td class="num" style="color:var(--orange)">${fmt(v.days61_90)}</td>
-      <td class="num" style="color:${v.days91_plus > 0 ? 'var(--red)' : 'inherit'}">${fmt(v.days91_plus)}</td>
+      <td class="num orange">${fmt(v.days31_60)}</td>
+      <td class="num orange">${fmt(v.days61_90)}</td>
+      <td class="num">${fmt(v.days91_plus)}</td>
     </tr>`).join('');
 }
 </script>
