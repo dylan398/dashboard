@@ -1128,6 +1128,402 @@ function groupBRecentLosses(D, days = 90) {
  
  
 // ════════════════════════════════════════════════════════════════════════
+// SECTION 4d ─ DSO / COLLECTIONS FORECAST (per-client payment behavior)
+// ════════════════════════════════════════════════════════════════════════
+//
+// DSO is computed AUTOMATICALLY from the qbo-transactions data Dylan is
+// already uploading via Admin. computeDSOFromTransactions(D) walks the AR
+// account's items list, separates Invoice rows from Payment rows, FIFO-
+// matches them per customer, and computes per-client DSO statistics
+// (mean/median/p75/p90, % paid by 30/60/90 days).
+//
+// Resolution order for dsoForClient(D, name):
+//   1. computeDSOFromTransactions(D) result (live, auto-computed)
+//   2. core/dso-reference.js static fallback baseline (ships with the dashboard)
+//
+// CONTEXT.md §8.0 reminder: SFS does NOT control when AR pays. These
+// helpers exist to *forecast* expected collections (a planning input,
+// not a do-something insight) — they should never become "chase this
+// customer" alarms.
+ 
+// Cache the computed DSO across multiple calls in the same render cycle.
+// Keyed by qbo-transactions meta.mergedAt so it invalidates on new upload.
+let _dsoComputedCache = null;
+let _dsoComputedKey   = null;
+ 
+/**
+ * Compute per-client DSO from the AR account in qbo-transactions.
+ * FIFO matches Invoice → Payment per customer.
+ *
+ * Output (same shape as the static reference, plus an extra `clients[]` and
+ * `byNorm` lookup):
+ *   {
+ *     summary: { clientCount, totalInvoices, totalPaid, portfolioMedianDSO,
+ *                clientsWith3Plus, clientsWith5Plus, clientsWith10Plus },
+ *     clients: [...],
+ *     byNorm: { normalizedName: clientStats },
+ *     source: 'computed-from-transactions',
+ *     coverage: { firstDate, lastDate, paidInvoiceCount },
+ *   }
+ *
+ * Returns null if there isn't enough AR history to compute.
+ */
+function computeDSOFromTransactions(D) {
+  const txn = D?.['qbo-transactions'];
+  if (!txn?.accountDetail) return null;
+ 
+  // Cache check
+  const cacheKey = txn.meta?.mergedAt || txn.meta?.parsedAt || '';
+  if (_dsoComputedKey === cacheKey && _dsoComputedCache) return _dsoComputedCache;
+ 
+  // Find the AR account (defensive — match the parser's isAR flag, then
+  // by name pattern as fallback).
+  let arInfo = null;
+  for (const [name, info] of Object.entries(txn.accountDetail)) {
+    if (info.isAR || /accounts\s*receivable/i.test(name) || /\ba\/?r\b/i.test(name)) {
+      arInfo = info; break;
+    }
+  }
+  if (!arInfo?.items?.length) return null;
+ 
+  // Split into invoices (debit AR — positive amount) and payments (credit AR — negative).
+  // QBO Transaction Detail by Account shows AR debits as positive (invoice
+  // increases AR) and credits as negative (payment reduces AR).
+  // Group by customer.
+  const norm = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const byCustomer = {};   // norm → { name, invoices: [], payments: [] }
+  for (const it of arInfo.items) {
+    if (!it.name || !it.date) continue;
+    const date = new Date(it.date);
+    if (isNaN(date)) continue;
+    const k = norm(it.name);
+    if (!byCustomer[k]) byCustomer[k] = { name: it.name, invoices: [], payments: [] };
+    const t = (it.type || '').toLowerCase();
+    if (it.amount > 0 && /invoice/.test(t)) {
+      byCustomer[k].invoices.push({ date, amount: it.amount, raw: it });
+    } else if (it.amount < 0 && /(payment|deposit)/.test(t)) {
+      byCustomer[k].payments.push({ date, amount: -it.amount, raw: it });
+    } else if (it.amount > 0) {
+      // Unknown positive type that increased AR — treat as invoice (charge / billable etc.)
+      byCustomer[k].invoices.push({ date, amount: it.amount, raw: it });
+    } else if (it.amount < 0) {
+      // Unknown negative type that reduced AR — treat as payment (credit memo, refund applied)
+      byCustomer[k].payments.push({ date, amount: -it.amount, raw: it });
+    }
+  }
+ 
+  // FIFO match per customer. For each customer, sort invoices and payments
+  // by date and walk through.
+  const percentile = (sorted, p) => {
+    if (!sorted.length) return null;
+    const i = Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * p)));
+    return sorted[i];
+  };
+  const clients = [];
+  let earliestDate = null, latestDate = null, totalPaidGlobal = 0;
+  for (const [k, c] of Object.entries(byCustomer)) {
+    if (!c.invoices.length) continue;
+    c.invoices.sort((a, b) => a.date - b.date);
+    c.payments.sort((a, b) => a.date - b.date);
+ 
+    // Track each invoice's remaining unpaid balance and earliest payment date.
+    const invQueue = c.invoices.map(inv => ({
+      invDate: inv.date,
+      original: inv.amount,
+      remaining: inv.amount,
+      firstPaymentDate: null,
+    }));
+    let pIdx = 0;
+    for (let i = 0; i < invQueue.length && pIdx < c.payments.length; i++) {
+      const inv = invQueue[i];
+      while (inv.remaining > 0.005 && pIdx < c.payments.length) {
+        const pay = c.payments[pIdx];
+        if (pay.amount <= 0.005) { pIdx++; continue; }
+        const apply = Math.min(inv.remaining, pay.amount);
+        inv.remaining -= apply;
+        pay.amount -= apply;
+        if (!inv.firstPaymentDate) inv.firstPaymentDate = pay.date;
+        if (pay.amount <= 0.005) pIdx++;
+      }
+    }
+ 
+    // Compute DSO for fully paid invoices. Use first-payment-date as the
+    // pay date — partial-pay timelines collapse to "when did money start
+    // landing for this invoice."
+    const dsos = [];
+    let paidTotal = 0;
+    invQueue.forEach(inv => {
+      if (inv.remaining < 0.01 && inv.firstPaymentDate) {
+        const days = Math.max(0, Math.round((inv.firstPaymentDate - inv.invDate) / 86400000));
+        dsos.push(days);
+        paidTotal += inv.original;
+        if (!earliestDate || inv.invDate < earliestDate) earliestDate = inv.invDate;
+        if (!latestDate   || inv.firstPaymentDate > latestDate) latestDate = inv.firstPaymentDate;
+      }
+    });
+    if (!dsos.length) continue;
+    dsos.sort((a, b) => a - b);
+    const sum = dsos.reduce((s, v) => s + v, 0);
+    const mean = +(sum / dsos.length).toFixed(2);
+    const variance = dsos.reduce((s, v) => s + (v - mean) ** 2, 0) / dsos.length;
+    const std = +Math.sqrt(variance).toFixed(1);
+    const pct = (n) => +(dsos.filter(d => d <= n).length / dsos.length).toFixed(2);
+    const pctOver = (n) => +(dsos.filter(d => d > n).length / dsos.length).toFixed(2);
+    totalPaidGlobal += paidTotal;
+    clients.push({
+      client: c.name,
+      nPaid: dsos.length,
+      meanDSO: mean,
+      medianDSO: percentile(dsos, 0.5),
+      p75DSO: percentile(dsos, 0.75),
+      p90DSO: percentile(dsos, 0.9),
+      maxDSO: dsos[dsos.length - 1],
+      pctPaid30d: pct(30),
+      pctPaid60d: pct(60),
+      pctPaid90d: pct(90),
+      pctPaidOver120d: pctOver(120),
+      stdDevDSO: std,
+      totalPaid: +paidTotal.toFixed(2),
+    });
+  }
+  if (!clients.length) return null;
+  clients.sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0));
+ 
+  // Portfolio-weighted median
+  let dsoSum = 0, dsoWt = 0;
+  clients.forEach(c => {
+    if (c.medianDSO != null && c.nPaid) { dsoSum += c.medianDSO * c.nPaid; dsoWt += c.nPaid; }
+  });
+  const portfolioMedianDSO = dsoWt > 0 ? +(dsoSum / dsoWt).toFixed(1) : null;
+  const totalInvoices = clients.reduce((s, c) => s + c.nPaid, 0);
+ 
+  // Build byNorm lookup
+  const byNorm = {};
+  clients.forEach(c => { byNorm[norm(c.client)] = c; });
+ 
+  const result = {
+    summary: {
+      clientCount: clients.length,
+      totalInvoices,
+      totalPaid: +totalPaidGlobal.toFixed(2),
+      portfolioMedianDSO,
+      clientsWith3Plus:  clients.filter(c => c.nPaid >= 3).length,
+      clientsWith5Plus:  clients.filter(c => c.nPaid >= 5).length,
+      clientsWith10Plus: clients.filter(c => c.nPaid >= 10).length,
+    },
+    clients,
+    byNorm,
+    source: 'computed-from-transactions',
+    coverage: {
+      firstDate: earliestDate ? earliestDate.toISOString().slice(0, 10) : null,
+      lastDate:  latestDate   ? latestDate.toISOString().slice(0, 10)   : null,
+      paidInvoiceCount: totalInvoices,
+    },
+  };
+  _dsoComputedCache = result;
+  _dsoComputedKey = cacheKey;
+  return result;
+}
+ 
+/**
+ * Look up DSO statistics for a client. Resolution order:
+ *   1. Live computed from qbo-transactions (auto-recomputes when Dylan
+ *      uploads new Transaction Detail).
+ *   2. Static fallback baseline (window.DSO_REFERENCE_FALLBACK).
+ */
+function dsoForClient(D, clientName) {
+  if (!clientName) return null;
+  const norm = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const key = norm(clientName);
+ 
+  // 1. Live auto-computed from transactions
+  const computed = computeDSOFromTransactions(D);
+  if (computed?.byNorm?.[key]) {
+    return { ...computed.byNorm[key], source: 'computed-from-transactions' };
+  }
+  // 2. Static fallback baseline
+  if (typeof window !== 'undefined' && window.DSO_REFERENCE_FALLBACK?.byNorm?.[key]) {
+    return { ...window.DSO_REFERENCE_FALLBACK.byNorm[key], source: 'static-baseline' };
+  }
+  return null;
+}
+ 
+/**
+ * Portfolio-wide DSO summary — fallback when a customer has no history.
+ * Resolution order matches dsoForClient.
+ */
+function dsoPortfolioSummary(D) {
+  const computed = computeDSOFromTransactions(D);
+  if (computed?.summary?.portfolioMedianDSO != null) {
+    return { ...computed.summary, source: 'computed-from-transactions' };
+  }
+  if (typeof window !== 'undefined' && window.DSO_REFERENCE_FALLBACK?.summary) {
+    return { ...window.DSO_REFERENCE_FALLBACK.summary, source: 'static-baseline' };
+  }
+  return null;
+}
+ 
+/**
+ * Estimate when an open invoice is likely to be paid. Returns:
+ *   {
+ *     invoiceDate, customer, amount,
+ *     daysOpen,                            (today - invoice date)
+ *     expectedDaysToPay,                   (median DSO for this customer or portfolio)
+ *     remainingDays,                       (expectedDaysToPay - daysOpen, can be negative if late)
+ *     expectedPayDate,                     ISO yyyy-mm-dd
+ *     p75PayDate, p90PayDate,              conservative tail estimates
+ *     confidence: 'client-history' | 'portfolio-fallback' | 'unknown',
+ *     nPaid,                               sample size for this customer's history
+ *     isLate,                              boolean — past expected pay date
+ *   }
+ *
+ * If the customer has < MIN_SAMPLE paid invoices, we annotate confidence
+ * as low and use portfolio-median as a soft prior. CONTEXT.md §2.4 +
+ * the user's note: "we don't know exactly, so don't pretend the number
+ * is precise." Always show the band, not a single deterministic date.
+ */
+function estimatePaymentDate(invoice, D) {
+  if (!invoice?.invoiceDate) return null;
+  const MIN_SAMPLE = 3;
+  const today = new Date();
+  const inv = new Date(invoice.invoiceDate);
+  if (isNaN(inv)) return null;
+  const daysOpen = Math.max(0, Math.floor((today - inv) / 86400000));
+  const customer = invoice.customer || invoice.client || invoice.name;
+ 
+  let expected = null, p75 = null, p90 = null;
+  let confidence = 'unknown';
+  let nPaid = 0;
+ 
+  const stats = dsoForClient(D, customer);
+  if (stats && stats.medianDSO != null && stats.nPaid >= MIN_SAMPLE) {
+    expected = stats.medianDSO;
+    p75 = stats.p75DSO ?? Math.round(expected * 1.3);
+    p90 = stats.p90DSO ?? Math.round(expected * 1.6);
+    confidence = 'client-history';
+    nPaid = stats.nPaid;
+  } else if (stats && stats.medianDSO != null) {
+    // Some history but below sample threshold — average with portfolio prior
+    const port = dsoPortfolioSummary(D);
+    const portMedian = port?.portfolioMedianDSO || 60;
+    expected = +((stats.medianDSO + portMedian) / 2).toFixed(0);
+    p75 = stats.p75DSO ?? Math.round(expected * 1.3);
+    p90 = stats.p90DSO ?? Math.round(expected * 1.6);
+    confidence = 'low-sample';
+    nPaid = stats.nPaid;
+  } else {
+    // No history — portfolio fallback
+    const port = dsoPortfolioSummary(D);
+    if (port?.portfolioMedianDSO != null) {
+      expected = port.portfolioMedianDSO;
+      p75 = Math.round(expected * 1.4);
+      p90 = Math.round(expected * 1.8);
+      confidence = 'portfolio-fallback';
+    }
+  }
+ 
+  if (expected == null) return null;
+ 
+  const addDays = (date, days) => {
+    const d = new Date(date.getTime() + days * 86400000);
+    return d.toISOString().slice(0, 10);
+  };
+  const remainingDays = expected - daysOpen;
+  return {
+    invoiceDate: invoice.invoiceDate,
+    customer,
+    amount: invoice.openBalance ?? invoice.amount ?? null,
+    daysOpen,
+    expectedDaysToPay: expected,
+    p75DaysToPay: p75,
+    p90DaysToPay: p90,
+    remainingDays,
+    expectedPayDate: addDays(inv, expected),
+    p75PayDate:      addDays(inv, p75),
+    p90PayDate:      addDays(inv, p90),
+    confidence,
+    nPaid,
+    isLate: remainingDays < 0,
+  };
+}
+ 
+/**
+ * Forecast collections from the *currently-open* invoice book over the
+ * next N days. For each open invoice we estimate the expected pay date
+ * (using estimatePaymentDate above) and bucket the dollar value into
+ * 0-30 / 31-60 / 61-90 / 91-120 / 120+ day bands counted from today.
+ *
+ * Output: {
+ *   asOf, totalOpen, byBucket: [{label, days:[from,to], amount, count, conf}],
+ *   topExpectedThisMonth: [...],     // soonest expected payments
+ *   confidenceBreakdown: { 'client-history':$, 'low-sample':$, 'portfolio-fallback':$, 'unknown':$ }
+ * }
+ *
+ * Buckets are based on remainingDays (expected - daysOpen). If
+ * remainingDays is negative (already past expected pay date), the
+ * invoice lands in 0-30 days "expected soon" — but flagged isLate.
+ */
+function forecastCollections(D) {
+  const oi = D?.['qbo-open-invoices'];
+  const invoices = oi?.invoices || [];
+  if (!invoices.length) return null;
+ 
+  const buckets = [
+    { label: '0–30 days',   days: [0, 30],   amount: 0, count: 0, items: [] },
+    { label: '31–60 days',  days: [31, 60],  amount: 0, count: 0, items: [] },
+    { label: '61–90 days',  days: [61, 90],  amount: 0, count: 0, items: [] },
+    { label: '91–120 days', days: [91, 120], amount: 0, count: 0, items: [] },
+    { label: '120+ days',   days: [121, Infinity], amount: 0, count: 0, items: [] },
+    { label: 'No estimate', days: [null, null], amount: 0, count: 0, items: [] },
+  ];
+  const confDollar = { 'client-history': 0, 'low-sample': 0, 'portfolio-fallback': 0, unknown: 0 };
+  let totalOpen = 0;
+  const all = [];
+ 
+  for (const inv of invoices) {
+    const est = estimatePaymentDate(inv, D);
+    const amount = inv.openBalance || 0;
+    totalOpen += amount;
+    if (!est) {
+      buckets[5].amount += amount; buckets[5].count++; buckets[5].items.push({ inv, est: null });
+      confDollar.unknown += amount;
+      all.push({ inv, est: null, sortKey: 99999 });
+      continue;
+    }
+    confDollar[est.confidence] = (confDollar[est.confidence] || 0) + amount;
+    const remaining = Math.max(0, est.remainingDays); // late invoices land in 0-30
+    let i = 0;
+    if (remaining > 30 && remaining <= 60)        i = 1;
+    else if (remaining > 60 && remaining <= 90)   i = 2;
+    else if (remaining > 90 && remaining <= 120)  i = 3;
+    else if (remaining > 120)                     i = 4;
+    buckets[i].amount += amount; buckets[i].count++;
+    buckets[i].items.push({ inv, est });
+    all.push({ inv, est, sortKey: est.remainingDays });
+  }
+ 
+  buckets.forEach(b => { b.amount = +b.amount.toFixed(2); });
+ 
+  // Sort by soonest expected payment
+  all.sort((a, b) => a.sortKey - b.sortKey);
+ 
+  return {
+    asOf: oi?.meta?.parsedAt || new Date().toISOString(),
+    totalOpen: +totalOpen.toFixed(2),
+    invoiceCount: invoices.length,
+    buckets,
+    topExpectedSoonest: all.slice(0, 25),
+    confidenceBreakdown: {
+      clientHistory:      +confDollar['client-history'].toFixed(2),
+      lowSample:          +confDollar['low-sample'].toFixed(2),
+      portfolioFallback:  +confDollar['portfolio-fallback'].toFixed(2),
+      unknown:            +confDollar.unknown.toFixed(2),
+    },
+  };
+}
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════
 // SECTION 5 ─ AUTO-INSIGHTS
 // ════════════════════════════════════════════════════════════════════════
 //
