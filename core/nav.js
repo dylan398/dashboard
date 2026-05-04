@@ -11,6 +11,7 @@ const NAV_PAGES = [
   { id: 'vendors',   label: 'Vendors',   href: '/dashboard/reports/vendors.html' },
   { id: 'pipeline',  label: 'Pipeline',  href: '/dashboard/reports/pipeline.html' },
   { id: 'outreach',  label: 'Outreach',  href: '/dashboard/reports/outreach.html' },
+  { id: 'winrates',  label: 'Win Rates', href: '/dashboard/reports/winrates.html' },
   { id: 'forecasts', label: 'Forecasts', href: '/dashboard/reports/forecasts.html' },
 ];
 const NAV_OPS = [

@@ -25,12 +25,14 @@
 <script src="../core/firebase.js?v=18"></script>
 <script src="../core/utils.js?v=18"></script>
 <script src="../core/dash.js?v=18"></script>
+<script src="../core/freshness.js?v=18"></script>
 <script src="../core/nav.js?v=18"></script>
 </head>
 <body>
 <main class="main">
   <div class="page-title">Vendors & AP</div>
   <div class="page-sub">Accounts payable aging, top vendors, payable trends.</div>
+  <div data-freshness-bar></div>
 
   <div class="page-note blue">
     <b>How AP differs from AR:</b> these are bills SFS needs to pay. Past-due here is more meaningful than for AR
@@ -81,6 +83,7 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
+  if (typeof FreshnessBar !== 'undefined') FreshnessBar.mount(D);
 
   renderKPIs(D);
   renderAgingBlock(ap);

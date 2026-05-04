@@ -25,6 +25,7 @@
 <script src="../core/firebase.js?v=18"></script>
 <script src="../core/utils.js?v=18"></script>
 <script src="../core/dash.js?v=18"></script>
+<script src="../core/freshness.js?v=18"></script>
 <script src="../core/nav.js?v=18"></script>
 <style>
 :root{
@@ -91,6 +92,7 @@ a{color:inherit;text-decoration:none}
 <main class="main">
   <div class="page-title">Customers & AR</div>
   <div class="page-sub">The customer book as it is — lifetime revenue, currently-open AR, time-to-pay distribution. Descriptive view; SFS bids every job and can't force payment timing.</div>
+  <div data-freshness-bar></div>
  
   <div class="note">
     <strong>How to read this page:</strong> nothing here is "do something" — it's "here's the shape of the book." TX subcontractors have no enforceable payment deadlines, so days-out is just <em>how long customers historically take to pay</em>, not a problem list. Concentration % is informational context for SBA loan narratives, not a warning.
@@ -160,6 +162,7 @@ loadDashboard((D, raw) => {
     document.getElementById('content').style.display = 'none';
     return;
   }
+  if (typeof FreshnessBar !== 'undefined') FreshnessBar.mount(D);
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
  

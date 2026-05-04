@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<!--
+  Win Rates — per-GC win-rate-over-time + tier classification + alias curation.
+
+  ▶ Read docs/CONTEXT.md §2.5 (Group A/B/C) and §8.0 (Actionability Rule)
+    before editing.
+
+    Pure-win-rate version of Group A/B/C. The static gc-segmentation.js was
+    derived from win rates too, but didn't account for GC name overlaps;
+    this page does, by walking the live alias store at /gc-aliases/ and
+    re-running the math each time the user accepts a merge.
+
+    Tiers (over a configurable time window — default last 12 months):
+      T1: ≥70% WR, ≥5 decided bids
+      T2: 30-69% WR, ≥5 decided bids
+      T3: 1-29% WR, ≥5 decided bids
+      T0: 0% WR, ≥5 decided bids (separated from T3 because the pattern
+          differs — chain-locked subs, public-sector incumbents, etc.)
+      Below sample: <5 decided bids
+
+    The page DESCRIBES the bid book — it doesn't generate "pursue this GC"
+    or "stop bidding that GC" recommendations. SFS bids every job they can.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFS — Win Rates</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="../core/firebase.js?v=18"></script>
+<script src="../core/utils.js?v=18"></script>
+<script src="../core/gc-segmentation.js?v=18"></script>
+<script src="../core/gc-aliases.js?v=18"></script>
+<script src="../core/winrate-engine.js?v=18"></script>
+<script src="../core/dso-reference.js?v=18"></script>
+<script src="../core/dash.js?v=18"></script>
+<script src="../core/nav.js?v=18"></script>
+<style>
+:root{
+  --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
+  --border:#252a38;--border-bright:#2e3448;
+  --yellow:#f5c842;--orange:#e07b2b;--red:#e05252;--green:#3ecf8e;--blue:#4a9eff;--purple:#9b6dff;
+  --txt-primary:#e8eaf0;--txt-secondary:#8a90a0;--txt-muted:#555c70;
+  --font-display:'Barlow Condensed',sans-serif;--font-body:'Barlow',sans-serif;--font-mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--txt-primary);font-family:var(--font-body);font-size:14px;min-height:100vh}
+a{color:inherit;text-decoration:none}
+
+.main{padding:24px 28px;max-width:1700px;margin:0 auto}
+.page-title{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:.04em}
+.page-sub{color:var(--txt-muted);font-size:13px;margin-bottom:8px}
+.page-meta{color:var(--txt-secondary);font-size:11.5px;font-family:var(--font-mono);margin-bottom:16px}
+.page-meta .stale{color:var(--orange)}
+.page-note{background:var(--bg-card);border-left:3px solid var(--blue);padding:11px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:20px;line-height:1.55}
+.page-note b{color:var(--txt-primary)}
+
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-label .accent{color:var(--yellow);margin-right:6px}
+.section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
+
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:14px}
+.kpi{background:var(--bg-card);border:1px solid var(--border);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--border-bright))}
+.kpi-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);margin-bottom:6px}
+.kpi-value{font-family:var(--font-mono);font-size:22px;font-weight:700;line-height:1;color:var(--txt-primary)}
+.kpi-sub{font-size:11px;color:var(--txt-muted);margin-top:5px;font-family:var(--font-mono)}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.yellow{color:var(--yellow)}.kpi-value.blue{color:var(--blue)}.kpi-value.orange{color:var(--orange)}.kpi-value.purple{color:var(--purple)}
+
+.panel{background:var(--bg-card);border:1px solid var(--border);padding:16px;margin-bottom:14px}
+.panel-title{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-secondary);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono);text-transform:none;letter-spacing:.04em;font-weight:400}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+
+.t{width:100%;border-collapse:collapse;font-size:12.5px}
+.t th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel);position:sticky;top:0}
+.t th.num,.t td.num{text-align:right;font-family:var(--font-mono)}
+.t td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary);vertical-align:top}
+.t tr:hover td{background:var(--bg-hover)}
+.t .num.green{color:var(--green)}.t .num.yellow{color:var(--yellow)}.t .num.blue{color:var(--blue)}.t .num.orange{color:var(--orange)}.t .num.muted{color:var(--txt-muted)}.t .num.red{color:var(--red)}
+
+.tag-T1{background:rgba(62,207,142,.18);color:var(--green);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
+.tag-T2{background:rgba(74,158,255,.18);color:var(--blue);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
+.tag-T3{background:rgba(224,123,43,.18);color:var(--orange);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
+.tag-T0{background:rgba(224,82,82,.18);color:var(--red);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
+.tag-LO{background:rgba(138,144,160,.16);color:var(--txt-muted);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;background:var(--bg-card);border:1px solid var(--border);padding:14px;margin-bottom:14px}
+.ctrl{display:flex;flex-direction:column;gap:4px}
+.ctrl label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);font-family:var(--font-display);font-weight:600}
+.ctrl input,.ctrl select{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:7px 10px;font-size:13px;font-family:var(--font-body);min-width:160px}
+.ctrl input:focus,.ctrl select:focus{outline:none;border-color:var(--yellow)}
+.btn{background:var(--yellow);color:#000;border:none;padding:9px 16px;font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+.btn:hover{background:#fdd55a}
+.btn-ghost{background:transparent;color:var(--txt-secondary);border:1px solid var(--border-bright);padding:8px 14px;font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+.btn-ghost:hover{border-color:var(--yellow);color:var(--yellow)}
+.btn-accept{background:rgba(62,207,142,.16);color:var(--green);border:1px solid rgba(62,207,142,.4)}
+.btn-accept:hover{background:rgba(62,207,142,.28)}
+.btn-reject{background:rgba(224,82,82,.14);color:var(--red);border:1px solid rgba(224,82,82,.35)}
+.btn-reject:hover{background:rgba(224,82,82,.24)}
+.btn-del{background:transparent;color:var(--txt-muted);border:1px solid var(--border);padding:4px 10px;font-size:10px;cursor:pointer;font-family:var(--font-mono)}
+.btn-del:hover{color:var(--red);border-color:var(--red)}
+
+.chart-wrap{position:relative;width:100%}
+.chart-wrap.h280{height:280px}.chart-wrap.h360{height:360px}.chart-wrap.h420{height:420px}
+
+.empty{color:var(--txt-muted);font-style:italic;padding:32px;text-align:center}
+.cap{font-size:11px;color:var(--txt-muted);margin-top:8px;line-height:1.55;font-style:italic}
+.scroll-y{overflow-y:auto;max-height:480px}
+
+.heatmap{overflow-x:auto;font-family:var(--font-mono);font-size:11px}
+.heatmap-row{display:grid;grid-template-columns:200px repeat(var(--cols),minmax(40px,1fr));border-bottom:1px solid var(--border)}
+.heatmap-row.hd{font-family:var(--font-display);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:var(--txt-muted);border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
+.heatmap-cat{padding:6px 8px;color:var(--txt-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.heatmap-cell{padding:5px;text-align:center;color:var(--txt-primary);border-left:1px solid var(--border)}
+
+.alias-row{display:grid;grid-template-columns:1.1fr 1.1fr 110px 110px 1fr;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px}
+.alias-row .gc{font-family:var(--font-display);color:var(--txt-primary);font-weight:600}
+.alias-row .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono);margin-top:2px}
+.alias-row .actions{display:flex;gap:6px;justify-content:flex-end}
+.alias-row .score{text-align:center;font-family:var(--font-mono);color:var(--yellow)}
+.alias-row .score .reason{display:block;font-size:10px;color:var(--txt-muted);margin-top:2px}
+
+.history-row{display:grid;grid-template-columns:1.2fr 1.2fr 100px 130px 80px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12.5px}
+.history-row.hd{font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);background:var(--bg-panel);font-weight:600;border-bottom:1px solid var(--border-bright)}
+
+.manual-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--border-bright);margin-top:14px}
+.manual-form input{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:9px 11px;font-size:13px}
+.manual-form input:focus{outline:none;border-color:var(--yellow)}
+.manual-form label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);font-family:var(--font-display);font-weight:600}
+
+.bar{height:14px;background:var(--bg-hover);border:1px solid var(--border);position:relative;overflow:hidden;border-radius:1px}
+.bar-fill{height:100%;float:left}
+
+.tier-band{padding:14px 16px;border:1px solid var(--border);border-left:4px solid var(--c);background:var(--bg-card);margin-bottom:6px}
+.tier-band.t1{--c:var(--green)}
+.tier-band.t2{--c:var(--blue)}
+.tier-band.t3{--c:var(--orange)}
+.tier-band.t0{--c:var(--red)}
+.tier-band.lo{--c:var(--txt-muted)}
+.tier-band-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.tier-band-name{font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:.04em}
+.tier-band-stats{font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)}
+</style>
+</head>
+<body>
+<main class="main">
+  <div class="page-title">Win Rates</div>
+  <div class="page-sub">Per-GC win-rate-over-time analysis · pure-rate tier classification (T1/T2/T3/T0) · alias curation. Descriptive only — not a "pursue these" recommendation engine.</div>
+  <div class="page-meta" id="page-meta">—</div>
+
+  <div class="page-note">
+    <b>How to read this page:</b> the top KPIs and Tier overview describe the bid book over the
+    selected window. The Possible Aliases panel surfaces likely GC name overlaps (Knowify lets
+    users type freely, so "JPI" and "JPI Companies" land as separate rows). Accepting a pair
+    persists the merge to Firebase, the math re-runs, and the Tier table updates. Reject if
+    they're actually different companies — that decision sticks too. The bid → cash chain
+    (lag, AR, etc.) lives on the Forecasts page; this page is purely about win rates.
+  </div>
+
+  <div id="empty-state" class="empty" style="display:none">
+    Need Knowify pipeline data to render this page. Upload via the Admin page.
+  </div>
+
+  <div id="content" style="display:none">
+    <!-- ═══════ TOP KPIs ═══════ -->
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <!-- ═══════ CONTROLS ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>Time window</span><span class="hint">Anchor + lookback · drives the monthly chart, heatmap, and tier-shift detector</span></div>
+    <div class="controls" id="controls">
+      <div class="ctrl">
+        <label for="ctrl-anchor">Anchor date</label>
+        <input type="date" id="ctrl-anchor">
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-lookback">Lookback (months)</label>
+        <select id="ctrl-lookback">
+          <option value="3">3 months</option>
+          <option value="6">6 months</option>
+          <option value="12" selected>12 months</option>
+          <option value="24">24 months</option>
+          <option value="36">36 months</option>
+          <option value="0">All time</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-min-bids">Min bids (tier inclusion)</label>
+        <select id="ctrl-min-bids">
+          <option value="3">3+</option>
+          <option value="5" selected>5+</option>
+          <option value="10">10+</option>
+          <option value="20">20+</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-rate-basis">Rate basis</label>
+        <select id="ctrl-rate-basis">
+          <option value="count" selected>Count (wins / decided)</option>
+          <option value="dollar">Dollar ($-weighted)</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-compare">Compare vs</label>
+        <select id="ctrl-compare">
+          <option value="prev-window" selected>Prior window of same length</option>
+          <option value="all-time-pre">All time before window start</option>
+        </select>
+      </div>
+      <button class="btn" id="btn-apply">Re-run analysis</button>
+    </div>
+
+    <!-- ═══════ TIER OVERVIEW ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Tier overview · all-time (after alias resolution)</span>
+      <span class="hint">All bids ever, with active aliases applied · re-runs when an alias is accepted</span>
+    </div>
+    <div id="tier-bands"></div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title"><span>Tier Distribution</span><span class="meta">all-time</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-tier-dist"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Win-rate Histogram</span><span class="meta">all GCs ≥ min bids</span></div>
+        <div class="chart-wrap h280"><canvas id="chart-wr-hist"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><span>All GCs · all-time</span><span class="meta">sortable · click GC name to chart its monthly trend</span></div>
+      <div class="scroll-y">
+        <table class="t" id="t-allgc">
+          <thead><tr>
+            <th>GC</th><th>Tier</th>
+            <th class="num">Bids</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Pending</th>
+            <th class="num">WR%</th><th class="num">$-WR%</th>
+            <th class="num">Won $</th><th class="num">Pending $</th>
+          </tr></thead><tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════ TIER SHIFT ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Tier shifts · current window vs prior window</span>
+      <span class="hint">GCs that moved between tiers · indicates trend, not directive</span>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Tier movers</span><span class="meta" id="shift-meta">—</span></div>
+      <div style="overflow:auto">
+        <table class="t" id="t-shift">
+          <thead><tr>
+            <th>GC</th>
+            <th class="num">Prev tier</th><th class="num">→</th><th class="num">Curr tier</th>
+            <th class="num">Prev WR</th><th class="num">Curr WR</th>
+            <th class="num">Prev bids</th><th class="num">Curr bids</th>
+            <th>Direction</th>
+          </tr></thead><tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════ PER-GC MONTHLY TREND ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Per-GC monthly trend</span>
+      <span class="hint">Cohort by bid-creation month · pending bids excluded from the rate</span>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Pick a GC</span>
+          <select id="ctrl-gc" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:6px 10px;font-size:12px;min-width:240px"></select>
+        </div>
+        <div class="chart-wrap h360"><canvas id="chart-gc-monthly"></canvas></div>
+        <div class="cap" id="gc-monthly-cap">—</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Aggregate WR over time</span><span class="meta">all classified GCs combined</span></div>
+        <div class="chart-wrap h360"><canvas id="chart-agg-monthly"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ═══════ COHORT HEATMAP ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Cohort heatmap</span>
+      <span class="hint">Rows = top GCs by bid count · columns = months · cell = WR (red→yellow→green)</span>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Top 25 GCs by bid count</span><span class="meta">scroll → for older months</span></div>
+      <div id="heatmap" class="heatmap"></div>
+      <div class="cap">Empty cells = no decided bids that month for that GC. Color scale: 0% red → 35% yellow → 70%+ green.</div>
+    </div>
+
+    <!-- ═══════ POSSIBLE ALIASES ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Possible aliases · review</span>
+      <span class="hint" id="alias-hint">Pairs that look like the same GC under different names · accept or reject</span>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Candidate pairs</span><span class="meta" id="alias-pair-count">—</span></div>
+      <div id="alias-candidates"></div>
+    </div>
+
+    <!-- ═══════ ALIAS HISTORY + MANUAL CREATOR ═══════ -->
+    <div class="section-label"><span><span class="accent">▸</span>Saved aliases</span><span class="hint">Persisted decisions · delete to re-surface a pair</span></div>
+    <div class="panel">
+      <div class="panel-title"><span>History</span><span class="meta" id="alias-history-count">—</span></div>
+      <div id="alias-history"></div>
+
+      <div class="manual-form">
+        <div>
+          <label for="m-primary">Primary GC name</label>
+          <input id="m-primary" list="gc-options" placeholder="e.g. Acme Construction">
+        </div>
+        <div>
+          <label for="m-alias">Also seen as (alias)</label>
+          <input id="m-alias" list="gc-options" placeholder="e.g. Acme Construction LLC">
+        </div>
+        <div>
+          <label for="m-note">Note (optional)</label>
+          <input id="m-note" placeholder="e.g. confirmed by phone 5/4">
+        </div>
+        <button class="btn" id="m-add">Add manual alias</button>
+      </div>
+      <datalist id="gc-options"></datalist>
+    </div>
+  </div>
+</main>
+
+<script>
+injectNavStyles();
+renderNav('winrates');
+setupChartTheme();
+
+// ────────────────────────────────────────────────────────────────────
+// Page state
+let _D = null;
+let _normalizedAll = [];      // all jobs, normalized + alias-resolved (recomputed when aliases change)
+let _byGCAllTime = [];
+let _charts = {};
+let _selectedGC = null;
+
+// ────────────────────────────────────────────────────────────────────
+// Boot
+loadDashboard(function (D, raw) {
+  _D = D;
+  if (!D || !D['knowify-jobs'] || !D['knowify-jobs'].jobs) {
+    document.getElementById('empty-state').style.display = 'block';
+    return;
+  }
+  document.getElementById('content').style.display = 'block';
+  setMeta(D);
+
+  // Default anchor = today
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('ctrl-anchor').value = today;
+
+  // Initial render now (before aliases load — uses static map only).
+  recomputeAndRender();
+
+  // Re-render whenever aliases change (Firebase live update).
+  if (window.GCAliases) {
+    window.GCAliases.onChange(function () {
+      recomputeAndRender();
+    });
+  }
+
+  // Wire controls.
+  document.getElementById('btn-apply').addEventListener('click', recomputeAndRender);
+  document.getElementById('ctrl-gc').addEventListener('change', function (e) {
+    _selectedGC = e.target.value;
+    renderGCMonthly();
+  });
+  document.getElementById('m-add').addEventListener('click', addManualAlias);
+});
+
+function setMeta(D) {
+  const k = D['knowify-jobs'];
+  const exported = k && k.meta && k.meta.parsedAt ? new Date(k.meta.parsedAt) : null;
+  const days = exported ? Math.floor((Date.now() - exported.getTime()) / 86400000) : null;
+  const stale = days != null && days > 14;
+  document.getElementById('page-meta').innerHTML = exported
+    ? 'Knowify export: <b>' + exported.toISOString().slice(0,10) + '</b> · <span class="' + (stale ? 'stale' : '') + '">' + days + ' day' + (days===1?'':'s') + ' ago</span>'
+    : 'No Knowify export timestamp.';
+}
+
+// Read current control values.
+function getOpts() {
+  return {
+    asOf: document.getElementById('ctrl-anchor').value || new Date().toISOString().slice(0, 10),
+    lookbackMonths: parseInt(document.getElementById('ctrl-lookback').value, 10) || 12,
+    minBids: parseInt(document.getElementById('ctrl-min-bids').value, 10) || 5,
+    rateBasis: document.getElementById('ctrl-rate-basis').value,
+    compare: document.getElementById('ctrl-compare').value,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Recompute everything from current state.
+function recomputeAndRender() {
+  if (!_D) return;
+  const E = window.WinRateEngine;
+  if (!E) { console.error('WinRateEngine not loaded'); return; }
+  _normalizedAll = E.normalizeJobs(_D['knowify-jobs'].jobs || {}, {});
+  _byGCAllTime = E.byGCAllTime(_normalizedAll, { excludeArtifact: true });
+
+  renderKPIs();
+  renderTierBands();
+  renderTierDistChart();
+  renderHistogram();
+  renderAllGCTable();
+  renderTierShift();
+  renderGCDropdown();
+  renderGCMonthly();
+  renderAggMonthly();
+  renderHeatmap();
+  renderAliasCandidates();
+  renderAliasHistory();
+  populateDatalist();
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Top KPIs
+function renderKPIs() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const tiers = E.classifyTiers(_byGCAllTime, { minBids: opts.minBids, useDollar: opts.rateBasis === 'dollar' });
+
+  const totalBids   = _byGCAllTime.reduce((s, r) => s + (r.bids || 0), 0);
+  const decided     = _byGCAllTime.reduce((s, r) => s + ((r.wins || 0) + (r.losses || 0)), 0);
+  const wins        = _byGCAllTime.reduce((s, r) => s + (r.wins || 0), 0);
+  const wonCV       = _byGCAllTime.reduce((s, r) => s + (r.wonCV || 0), 0);
+  const lostCV      = _byGCAllTime.reduce((s, r) => s + (r.lostCV || 0), 0);
+  const blendedWR   = decided > 0 ? +(wins / decided * 100).toFixed(1) : null;
+  const dollarWR    = (wonCV + lostCV) > 0 ? +(wonCV / (wonCV + lostCV) * 100).toFixed(1) : null;
+
+  const kpi = (label, value, opts2 = {}) => `
+    <div class="kpi" style="--kpi-color:var(--${opts2.color || 'border-bright'})">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${opts2.color || ''}">${value}</div>
+      <div class="kpi-sub">${opts2.sub || '&nbsp;'}</div>
+    </div>`;
+  document.getElementById('kpi-row').innerHTML = [
+    kpi('GCs analyzed', String(_byGCAllTime.length), { color: 'yellow', sub: 'after alias resolution' }),
+    kpi('Total bids',   String(totalBids), { color: 'blue', sub: decided + ' decided · ' + (totalBids - decided) + ' pending' }),
+    kpi('Win rate (count)', blendedWR != null ? blendedWR + '%' : '—', { color: 'green', sub: wins + ' wins / ' + decided + ' decided' }),
+    kpi('Win rate ($)',     dollarWR != null ? dollarWR + '%' : '—', { color: 'green', sub: '$ won / $ decided' }),
+    kpi('Tier 1 GCs', String(tiers.counts.T1), { color: 'green', sub: '≥70% WR · ' + opts.minBids + '+ bids' }),
+    kpi('Tier 0 / 3 GCs', (tiers.counts.T0 + tiers.counts.T3) + '', { color: 'red', sub: tiers.counts.T0 + ' zero-win + ' + tiers.counts.T3 + ' very low' }),
+  ].join('');
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Tier bands (color-coded summary blocks)
+function renderTierBands() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const tiers = E.classifyTiers(_byGCAllTime, { minBids: opts.minBids, useDollar: opts.rateBasis === 'dollar' });
+  const wrap = document.getElementById('tier-bands');
+  const TIERS = [
+    { key: 'T1', cls: 't1', label: 'Tier 1 · ≥70% WR', desc: 'Strong delivery — these GCs award SFS at a high clip historically.' },
+    { key: 'T2', cls: 't2', label: 'Tier 2 · 30–69% WR', desc: 'Active competitive — neither favored nor blocked.' },
+    { key: 'T3', cls: 't3', label: 'Tier 3 · 1–29% WR', desc: 'Low conversion — pattern not yet zero, but well below average.' },
+    { key: 'T0', cls: 't0', label: 'Tier 0 · 0% WR', desc: 'Zero wins despite ' + opts.minBids + '+ decided. Often chain-locked or incumbent-controlled.' },
+    { key: 'belowSample', cls: 'lo', label: 'Below sample · <' + opts.minBids + ' decided', desc: 'Not enough decided bids to score reliably. Could be new GCs or thin history.' },
+  ];
+  wrap.innerHTML = TIERS.map(t => {
+    const sm = tiers.summary[t.key === 'belowSample' ? 'T1' : t.key]; // belowSample has no summary entry; show counts
+    const list = tiers[t.key] || [];
+    const bids = list.reduce((s, r) => s + (r.bids || 0), 0);
+    const wonCV = list.reduce((s, r) => s + (r.wonCV || 0), 0);
+    return `
+      <div class="tier-band ${t.cls}">
+        <div class="tier-band-head">
+          <div class="tier-band-name">${t.label}</div>
+          <div class="tier-band-stats">${list.length} GCs · ${bids} bids · ${fmt(wonCV)} won</div>
+        </div>
+        <div style="font-size:12px;color:var(--txt-muted);line-height:1.5">${t.desc}</div>
+      </div>`;
+  }).join('');
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Tier distribution donut chart
+function renderTierDistChart() {
+  const opts = getOpts();
+  const tiers = window.WinRateEngine.classifyTiers(_byGCAllTime, { minBids: opts.minBids, useDollar: opts.rateBasis === 'dollar' });
+  const ctx = document.getElementById('chart-tier-dist');
+  if (_charts.tierDist) _charts.tierDist.destroy();
+  _charts.tierDist = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['T1 (≥70%)', 'T2 (30-69%)', 'T3 (1-29%)', 'T0 (0%)', 'Below sample'],
+      datasets: [{
+        data: [tiers.counts.T1, tiers.counts.T2, tiers.counts.T3, tiers.counts.T0, tiers.counts.belowSample],
+        backgroundColor: [CHART_COLORS.green + 'cc', CHART_COLORS.blue + 'cc', CHART_COLORS.orange + 'cc', CHART_COLORS.red + 'cc', CHART_COLORS.muted + 'cc'],
+        borderColor:     [CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.orange, CHART_COLORS.red, CHART_COLORS.muted],
+        borderWidth: 1,
+      }],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right' }, tooltip: { callbacks: { label: c => c.label + ': ' + c.parsed + ' GCs' } } } },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Win-rate histogram (10pt bins)
+function renderHistogram() {
+  const opts = getOpts();
+  const eligible = _byGCAllTime.filter(r => (r.wins + r.losses) >= opts.minBids && r.wr != null);
+  const bins = new Array(11).fill(0); // 0,1-10,11-20,...,91-100. Cell 0 = exact 0%.
+  eligible.forEach(r => {
+    if (r.wr === 0) bins[0]++;
+    else {
+      const idx = Math.min(10, Math.floor(r.wr / 10) + 1);
+      bins[idx]++;
+    }
+  });
+  const labels = ['0%', '1-10', '11-20', '21-30', '31-40', '41-50', '51-60', '61-70', '71-80', '81-90', '91-100'];
+  const colors = ['#e05252', '#e07b2b', '#e07b2b', '#e07b2b', '#4a9eff', '#4a9eff', '#4a9eff', '#4a9eff', '#3ecf8e', '#3ecf8e', '#3ecf8e'];
+  const ctx = document.getElementById('chart-wr-hist');
+  if (_charts.hist) _charts.hist.destroy();
+  _charts.hist = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{
+      label: 'GCs', data: bins,
+      backgroundColor: colors.map(c => c + 'aa'),
+      borderColor: colors, borderWidth: 1,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y + ' GCs' } } } },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// All GCs table — sortable, clickable
+let _allGCSort = { key: 'bids', dir: 'desc' };
+function renderAllGCTable() {
+  const opts = getOpts();
+  const tbody = document.querySelector('#t-allgc tbody');
+  const tier = (r) => {
+    const dec = r.wins + r.losses;
+    if (dec < opts.minBids || r.wr == null) return { tag: 'tag-LO', label: '—' };
+    if (r.wr >= 70) return { tag: 'tag-T1', label: 'T1' };
+    if (r.wr >= 30) return { tag: 'tag-T2', label: 'T2' };
+    if (r.wr > 0)   return { tag: 'tag-T3', label: 'T3' };
+    return { tag: 'tag-T0', label: 'T0' };
+  };
+  const sorted = _byGCAllTime.slice().sort((a, b) => {
+    const k = _allGCSort.key, dir = _allGCSort.dir === 'asc' ? 1 : -1;
+    const va = a[k] != null ? a[k] : -1;
+    const vb = b[k] != null ? b[k] : -1;
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return 0;
+  });
+  tbody.innerHTML = sorted.map(r => {
+    const t = tier(r);
+    return `<tr style="cursor:pointer" onclick="selectGC('${escapeAttr(r.gc)}')">
+      <td><strong>${escapeHtml(r.gc)}</strong></td>
+      <td><span class="${t.tag}">${t.label}</span></td>
+      <td class="num">${r.bids}</td>
+      <td class="num green">${r.wins}</td>
+      <td class="num red">${r.losses}</td>
+      <td class="num muted">${r.pending}</td>
+      <td class="num ${r.wr != null && r.wr >= 70 ? 'green' : (r.wr != null && r.wr >= 30 ? 'blue' : 'orange')}">${r.wr != null ? r.wr + '%' : '—'}</td>
+      <td class="num muted">${r.dollarWR != null ? r.dollarWR + '%' : '—'}</td>
+      <td class="num">${fmt(r.wonCV)}</td>
+      <td class="num muted">${fmt(r.pendingCV)}</td>
+    </tr>`;
+  }).join('');
+  // Wire header sort.
+  document.querySelectorAll('#t-allgc thead th').forEach((th, i) => {
+    const KEYS = ['gc','wr','bids','wins','losses','pending','wr','dollarWR','wonCV','pendingCV'];
+    th.style.cursor = 'pointer';
+    th.onclick = () => {
+      const k = KEYS[i];
+      _allGCSort = (_allGCSort.key === k) ? { key: k, dir: _allGCSort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'desc' };
+      renderAllGCTable();
+    };
+  });
+}
+
+window.selectGC = function (gc) {
+  _selectedGC = gc;
+  document.getElementById('ctrl-gc').value = gc;
+  renderGCMonthly();
+  document.querySelector('#chart-gc-monthly').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+// ────────────────────────────────────────────────────────────────────
+// Tier shift detector
+function renderTierShift() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const anchor = new Date(opts.asOf);
+  const lookback = opts.lookbackMonths;
+  let prevJobs, currJobs;
+  if (lookback === 0) {
+    document.querySelector('#t-shift tbody').innerHTML = '<tr><td colspan="9" class="empty">All-time mode: tier-shift comparison disabled.</td></tr>';
+    document.getElementById('shift-meta').textContent = 'all-time mode';
+    return;
+  }
+  const currStart = new Date(anchor); currStart.setMonth(currStart.getMonth() - lookback);
+  const prevEnd = new Date(currStart);
+  let prevStart;
+  if (opts.compare === 'prev-window') {
+    prevStart = new Date(prevEnd); prevStart.setMonth(prevStart.getMonth() - lookback);
+  } else {
+    // all time before current window
+    prevStart = new Date('2000-01-01');
+  }
+  currJobs = E.filterByWindow(_normalizedAll, currStart, anchor);
+  prevJobs = E.filterByWindow(_normalizedAll, prevStart, prevEnd);
+
+  const shifts = E.tierShift(currJobs, prevJobs, { minBids: opts.minBids });
+  document.getElementById('shift-meta').textContent =
+    'curr: ' + currStart.toISOString().slice(0,10) + ' → ' + anchor.toISOString().slice(0,10) +
+    ' · prev: ' + prevStart.toISOString().slice(0,10) + ' → ' + prevEnd.toISOString().slice(0,10);
+
+  const tbody = document.querySelector('#t-shift tbody');
+  if (!shifts.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No tier shifts between the two windows. Either samples are too thin or rates held steady.</td></tr>';
+    return;
+  }
+  const dirIcon = (d) => d === 'up' ? '<span style="color:var(--green)">↑ up</span>'
+                     : d === 'down' ? '<span style="color:var(--red)">↓ down</span>'
+                     : '<span style="color:var(--txt-muted)">— lateral</span>';
+  const tagFor = (t) => t ? `<span class="tag-${t}">${t}</span>` : '<span class="tag-LO">—</span>';
+  tbody.innerHTML = shifts.map(s => `
+    <tr>
+      <td><strong>${escapeHtml(s.gc)}</strong></td>
+      <td class="num">${tagFor(s.prevTier)}</td>
+      <td class="num muted">→</td>
+      <td class="num">${tagFor(s.currTier)}</td>
+      <td class="num muted">${s.prevWR != null ? s.prevWR + '%' : '—'}</td>
+      <td class="num ${s.currWR != null && s.currWR >= 70 ? 'green' : (s.currWR != null && s.currWR >= 30 ? 'blue' : 'orange')}">${s.currWR != null ? s.currWR + '%' : '—'}</td>
+      <td class="num muted">${s.prevBids}</td>
+      <td class="num">${s.currBids}</td>
+      <td>${dirIcon(s.direction)}</td>
+    </tr>`).join('');
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Per-GC monthly trend
+function renderGCDropdown() {
+  const sel = document.getElementById('ctrl-gc');
+  const opts = getOpts();
+  const eligible = _byGCAllTime.filter(r => r.bids >= opts.minBids).slice().sort((a, b) => b.bids - a.bids);
+  if (!eligible.length) { sel.innerHTML = '<option value="">No GCs with enough bids</option>'; return; }
+  if (!_selectedGC) _selectedGC = eligible[0].gc;
+  sel.innerHTML = eligible.map(r => {
+    const tag = r.wr == null ? '—' : (r.wr >= 70 ? 'T1' : r.wr >= 30 ? 'T2' : r.wr > 0 ? 'T3' : 'T0');
+    return `<option value="${escapeAttr(r.gc)}" ${r.gc === _selectedGC ? 'selected' : ''}>${escapeHtml(r.gc)} · ${r.bids}b · ${tag} · ${r.wr != null ? r.wr + '%' : '—'}</option>`;
+  }).join('');
+}
+
+function renderGCMonthly() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const ctx = document.getElementById('chart-gc-monthly');
+  const cap = document.getElementById('gc-monthly-cap');
+  if (!_selectedGC) {
+    if (_charts.gcMonthly) _charts.gcMonthly.destroy();
+    cap.textContent = 'No GC selected.';
+    return;
+  }
+  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12 });
+  const g = series.byGC[_selectedGC];
+  const labels = series.months.map(m => m.label);
+  if (!g) {
+    if (_charts.gcMonthly) _charts.gcMonthly.destroy();
+    _charts.gcMonthly = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'No data in window', data: labels.map(() => null), borderColor: CHART_COLORS.muted }] },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+    cap.textContent = '"' + _selectedGC + '" had no bids in this window.';
+    return;
+  }
+  const wrSeries = g.series.map(s => s.wr);
+  const decSeries = g.series.map(s => s.decided);
+  if (_charts.gcMonthly) _charts.gcMonthly.destroy();
+  _charts.gcMonthly = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'line', label: 'Win rate %', data: wrSeries, yAxisID: 'y',
+          borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '33',
+          tension: 0.2, borderWidth: 2.5, pointRadius: 4, spanGaps: true },
+        { type: 'bar', label: 'Decided bids', data: decSeries, yAxisID: 'y1',
+          backgroundColor: CHART_COLORS.blue + '55', borderColor: CHART_COLORS.blue, borderWidth: 1 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: {
+        y:  { position: 'left',  min: 0, max: 100, ticks: { callback: v => v + '%' }, title: { display: true, text: 'Win rate' } },
+        y1: { position: 'right', min: 0, ticks: { precision: 0 }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Decided bids' } },
+      },
+      plugins: { tooltip: { callbacks: {
+        afterLabel: c => {
+          const idx = c.dataIndex;
+          const cell = g.series[idx];
+          return ['wins: ' + cell.wins, 'losses: ' + cell.losses, 'pending (excl): ' + cell.pending].join('\n');
+        },
+      } } } },
+  });
+  cap.textContent = 'Window total: ' + (g.totalWins + g.totalLosses) + ' decided · ' + g.totalWins + ' won → ' +
+    (g.windowWR != null ? g.windowWR + '% WR' : '—') + ' over ' + opts.lookbackMonths + 'mo · ' + g.totalPending + ' still pending (excluded from rate).';
+}
+
+function renderAggMonthly() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12 });
+  // Aggregate across all GCs per month.
+  const agg = series.months.map(m => ({ ym: m.ym, label: m.label, wins: 0, losses: 0, pending: 0 }));
+  Object.values(series.byGC).forEach(g => {
+    g.series.forEach((s, i) => {
+      agg[i].wins    += s.wins;
+      agg[i].losses  += s.losses;
+      agg[i].pending += s.pending;
+    });
+  });
+  const labels = agg.map(a => a.label);
+  const wr = agg.map(a => {
+    const d = a.wins + a.losses;
+    return d > 0 ? +(a.wins / d * 100).toFixed(1) : null;
+  });
+  const dec = agg.map(a => a.wins + a.losses);
+  const ctx = document.getElementById('chart-agg-monthly');
+  if (_charts.aggMonthly) _charts.aggMonthly.destroy();
+  _charts.aggMonthly = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'line', label: 'Aggregate WR%', data: wr, yAxisID: 'y',
+          borderColor: CHART_COLORS.green, backgroundColor: CHART_COLORS.green + '33',
+          tension: 0.2, borderWidth: 2.5, pointRadius: 4, spanGaps: true },
+        { type: 'bar', label: 'Decided bids (all GCs)', data: dec, yAxisID: 'y1',
+          backgroundColor: CHART_COLORS.muted + '55', borderColor: CHART_COLORS.muted, borderWidth: 1 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: {
+        y:  { position: 'left',  min: 0, max: 100, ticks: { callback: v => v + '%' } },
+        y1: { position: 'right', min: 0, ticks: { precision: 0 }, grid: { drawOnChartArea: false } },
+      } },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Cohort heatmap
+function renderHeatmap() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12, minBidsForSeries: opts.minBids });
+  const TOP = 25;
+  const list = Object.values(series.byGC).sort((a, b) => b.totalBids - a.totalBids).slice(0, TOP);
+  const heatmap = document.getElementById('heatmap');
+  if (!list.length) {
+    heatmap.innerHTML = '<div class="empty">No GCs meet the bid threshold in this window.</div>';
+    return;
+  }
+  const cols = series.months.length;
+  const colorFor = (wr) => {
+    if (wr == null) return 'transparent';
+    // 0% → red, 35% → yellow, 70%+ → green
+    if (wr <= 35) {
+      const t = wr / 35;
+      const r = Math.round(224 + (245 - 224) * t);
+      const g = Math.round(82 + (200 - 82) * t);
+      const b = Math.round(82 + (66 - 82) * t);
+      return 'rgba(' + r + ',' + g + ',' + b + ',0.85)';
+    }
+    const t = Math.min(1, (wr - 35) / 35);
+    const r = Math.round(245 + (62 - 245) * t);
+    const g = Math.round(200 + (207 - 200) * t);
+    const b = Math.round(66 + (142 - 66) * t);
+    return 'rgba(' + r + ',' + g + ',' + b + ',0.85)';
+  };
+  const header = `<div class="heatmap-row hd" style="--cols:${cols}">
+    <div class="heatmap-cat">GC · bids · WR</div>
+    ${series.months.map(m => `<div class="heatmap-cell">${m.label.split(' ')[0]}<br>'${m.ym.slice(2,4)}</div>`).join('')}
+  </div>`;
+  const rows = list.map(g => `
+    <div class="heatmap-row" style="--cols:${cols}" onclick="selectGC('${escapeAttr(g.gc)}')" role="button" style2="cursor:pointer">
+      <div class="heatmap-cat" title="${escapeAttr(g.gc)}"><strong>${escapeHtml(g.gc)}</strong> · ${g.totalBids}b · ${g.windowWR != null ? g.windowWR + '%' : '—'}</div>
+      ${g.series.map(s => `<div class="heatmap-cell" style="background:${colorFor(s.wr)};color:${s.wr == null ? 'var(--txt-muted)' : '#0d0f14'}" title="wins: ${s.wins} / losses: ${s.losses} / pending: ${s.pending}">${s.wr != null ? Math.round(s.wr) : '·'}</div>`).join('')}
+    </div>`).join('');
+  heatmap.innerHTML = header + rows;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Possible Aliases panel
+function renderAliasCandidates() {
+  const wrap = document.getElementById('alias-candidates');
+  if (!window.GCAliases) {
+    wrap.innerHTML = '<div class="empty">Alias module not loaded.</div>';
+    return;
+  }
+  const candidates = window.GCAliases.findOverlaps(_byGCAllTime, { minScore: 0.78, maxResults: 50 });
+  document.getElementById('alias-pair-count').textContent = candidates.length + ' candidate pair' + (candidates.length === 1 ? '' : 's');
+  if (!candidates.length) {
+    wrap.innerHTML = '<div class="empty">No more candidates above the 0.78 similarity threshold. Either everything’s been resolved or there are no fuzzy matches in the bid book.</div>';
+    return;
+  }
+  wrap.innerHTML = candidates.map((c, i) => {
+    const id = 'cand-' + i;
+    return `
+      <div class="alias-row" id="${id}">
+        <div>
+          <div class="gc">${escapeHtml(c.a)}</div>
+          <div class="meta">${c.aBids} bid${c.aBids === 1 ? '' : 's'} all-time</div>
+        </div>
+        <div>
+          <div class="gc">${escapeHtml(c.b)}</div>
+          <div class="meta">${c.bBids} bid${c.bBids === 1 ? '' : 's'} all-time</div>
+        </div>
+        <div class="score">${(c.score * 100).toFixed(0)}%<span class="reason">${c.reason}</span></div>
+        <div class="score muted" style="font-size:11px">total: ${c.aBids + c.bBids}</div>
+        <div class="actions">
+          <button class="btn-ghost btn-accept" onclick="acceptAlias(${i}, '${escapeAttr(c.a)}', '${escapeAttr(c.b)}', ${c.aBids}, ${c.bBids})">Same — merge</button>
+          <button class="btn-ghost btn-reject" onclick="rejectAlias(${i}, '${escapeAttr(c.a)}', '${escapeAttr(c.b)}')">Different</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+window.acceptAlias = async function (idx, a, b, aBids, bBids) {
+  // The one with more bids becomes the primary (canonical).
+  const primary = aBids >= bBids ? a : b;
+  const alias   = aBids >= bBids ? b : a;
+  try {
+    await window.GCAliases.addAlias({ primary, alias, status: 'accepted', note: 'reviewed via winrates page' });
+    // onChange callback will trigger recomputeAndRender
+  } catch (e) {
+    alert('Failed to save alias: ' + (e.message || e));
+  }
+};
+
+window.rejectAlias = async function (idx, a, b) {
+  try {
+    await window.GCAliases.addAlias({ primary: a, alias: b, status: 'rejected', note: 'flagged not-same-GC' });
+  } catch (e) {
+    alert('Failed to save decision: ' + (e.message || e));
+  }
+};
+
+// ────────────────────────────────────────────────────────────────────
+// Alias history + manual creator
+function renderAliasHistory() {
+  const wrap = document.getElementById('alias-history');
+  if (!window.GCAliases) { wrap.innerHTML = '<div class="empty">—</div>'; return; }
+  const list = window.GCAliases.listAliases();
+  document.getElementById('alias-history-count').textContent = list.length + ' saved decision' + (list.length === 1 ? '' : 's');
+  const head = `<div class="history-row hd"><div>Primary</div><div>Alias</div><div>Status</div><div>Saved</div><div></div></div>`;
+  if (!list.length) { wrap.innerHTML = head + '<div class="empty">No alias decisions saved yet.</div>'; return; }
+  const statusBadge = (s) => s === 'accepted' ? '<span class="tag-T1">accepted</span>'
+                          : s === 'rejected' ? '<span class="tag-T0">rejected</span>'
+                          : '<span class="tag-T2">manual</span>';
+  wrap.innerHTML = head + list.map(a => `
+    <div class="history-row">
+      <div><strong>${escapeHtml(a.primary)}</strong></div>
+      <div>${escapeHtml(a.alias)}</div>
+      <div>${statusBadge(a.status)}</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)">${a.ts ? a.ts.slice(0,10) : '—'}</div>
+      <div style="text-align:right"><button class="btn-del" onclick="deleteAliasUI('${escapeAttr(a.key)}')">Delete</button></div>
+    </div>`).join('');
+}
+
+window.deleteAliasUI = async function (key) {
+  if (!confirm('Delete this alias decision? It will re-surface in candidate review next refresh.')) return;
+  try {
+    await window.GCAliases.deleteAlias(key);
+  } catch (e) {
+    alert('Failed: ' + (e.message || e));
+  }
+};
+
+async function addManualAlias() {
+  const primary = document.getElementById('m-primary').value.trim();
+  const alias   = document.getElementById('m-alias').value.trim();
+  const note    = document.getElementById('m-note').value.trim();
+  if (!primary || !alias) { alert('Both primary and alias names are required.'); return; }
+  if (window.GCAliases.norm(primary) === window.GCAliases.norm(alias)) { alert('Primary and alias normalize to the same string — nothing to merge.'); return; }
+  try {
+    await window.GCAliases.addAlias({ primary, alias, status: 'manual', note });
+    document.getElementById('m-primary').value = '';
+    document.getElementById('m-alias').value = '';
+    document.getElementById('m-note').value = '';
+  } catch (e) {
+    alert('Failed: ' + (e.message || e));
+  }
+}
+
+function populateDatalist() {
+  const dl = document.getElementById('gc-options');
+  dl.innerHTML = _byGCAllTime.map(r => `<option value="${escapeAttr(r.gc)}">`).join('');
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Helpers
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function escapeAttr(s) { return escapeHtml(s).replace(/'/g, '&#39;'); }
+</script>
+</body>
+</html>

@@ -31,6 +31,7 @@
 <script src="../core/gc-segmentation.js?v=18"></script>
 <script src="../core/dso-reference.js?v=18"></script>
 <script src="../core/dash.js?v=18"></script>
+<script src="../core/freshness.js?v=18"></script>
 <script src="../core/nav.js?v=18"></script>
 <style>
 :root{
@@ -119,6 +120,7 @@ a{color:inherit;text-decoration:none}
 <main class="main">
   <div class="page-title">Forecasts</div>
   <div class="page-sub">Unified financial forecast — AR collections, pipeline-to-revenue, and 12-month projection. Planning inputs, not alarms.</div>
+  <div data-freshness-bar></div>
 
   <div class="page-note">
     <b>How the three forecasts interact:</b><br>
@@ -363,6 +365,7 @@ loadDashboard((D, raw) => {
   }
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('content').style.display = 'block';
+  if (typeof FreshnessBar !== 'undefined') FreshnessBar.mount(D);
 
   renderKPIs(D);
   renderFlow(D);
