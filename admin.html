@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="core/firebase.js?v=18"></script>
 <script src="core/utils.js?v=18"></script>
 <script src="core/nav.js?v=18"></script>
@@ -251,8 +252,28 @@ a{color:inherit;text-decoration:none}
 </div>
 
 <script>
-const APP_PASS = 'Semperfi3004!';
+// SHA-256 of the admin password — plaintext is no longer in the bundle.
+// Same password as the scheduler editor (deliberate — same people).
+const APP_PASS_HASH = 'ea3c2794eec6b180da9a78177c64ec0b523409703d649eb274a6468a130f9f8b';
 const SESSION_KEY = 'sfs-admin-auth';
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Sign in anonymously to Firebase Auth so security rules can require auth
+// for writes to /dashboard. Reads are open. Idempotent.
+async function ensureAnonAuth() {
+  try {
+    if (firebase.auth().currentUser) return firebase.auth().currentUser;
+    const cred = await firebase.auth().signInAnonymously();
+    return cred.user;
+  } catch (e) {
+    console.error('Anonymous auth failed:', e);
+    throw e;
+  }
+}
 const PARSERS = [PARSER_PL, PARSER_PL_MONTHLY, PARSER_BS, PARSER_CF, PARSER_AR_AGING, PARSER_AP_AGING, PARSER_OPEN_INVOICES, PARSER_SALES, PARSER_TXN, PARSER_KNOWIFY];
 const parsedData = {};      // { id: parsedDataObject }
 const parsedWarnings = {};  // { id: ['warning text', ...] }
@@ -903,22 +924,25 @@ async function testConnection() {
 }
 
 // ── INIT ─────────────────────────────────────────────────────
-function enterApp() {
+async function enterApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
+  await ensureAnonAuth();
   initApp();
 }
 
 function doLogout() {
   try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
+  if (firebase.auth().currentUser) firebase.auth().signOut().catch(() => {});
   location.reload();
 }
 
-function doLogin() {
+async function doLogin() {
   const val = document.getElementById('pw-input').value;
-  if (val === APP_PASS) {
+  const hash = await sha256(val);
+  if (hash === APP_PASS_HASH) {
     try { sessionStorage.setItem(SESSION_KEY, '1'); } catch(e) { /* private mode */ }
-    enterApp();
+    await enterApp();
   } else {
     document.getElementById('login-err').textContent = 'Incorrect password.';
   }
