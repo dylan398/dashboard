@@ -30,14 +30,14 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=18"></script>
-<script src="../core/utils.js?v=18"></script>
-<script src="../core/gc-segmentation.js?v=18"></script>
-<script src="../core/gc-aliases.js?v=18"></script>
-<script src="../core/winrate-engine.js?v=18"></script>
-<script src="../core/dso-reference.js?v=18"></script>
-<script src="../core/dash.js?v=18"></script>
-<script src="../core/nav.js?v=18"></script>
+<script src="../core/firebase.js?v=19"></script>
+<script src="../core/utils.js?v=19"></script>
+<script src="../core/gc-segmentation.js?v=19"></script>
+<script src="../core/gc-aliases.js?v=19"></script>
+<script src="../core/winrate-engine.js?v=19"></script>
+<script src="../core/dso-reference.js?v=19"></script>
+<script src="../core/dash.js?v=19"></script>
+<script src="../core/nav.js?v=19"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -404,26 +404,63 @@ function getOpts() {
 
 // ────────────────────────────────────────────────────────────────────
 // Recompute everything from current state.
+// Each render function is wrapped in try/catch so one failure doesn't
+// kill the rest of the page. The expensive O(n²) findOverlaps and the
+// 200-entry datalist population are deferred to the next frame so the
+// initial paint isn't blocked. monthlySeries is cached on the module
+// state so renderHeatmap/renderGCMonthly/renderAggMonthly don't each
+// recompute it.
+let _monthlyCache = null;
+let _renderInFlight = false;
 function recomputeAndRender() {
   if (!_D) return;
-  const E = window.WinRateEngine;
-  if (!E) { console.error('WinRateEngine not loaded'); return; }
-  _normalizedAll = E.normalizeJobs(_D['knowify-jobs'].jobs || {}, {});
-  _byGCAllTime = E.byGCAllTime(_normalizedAll, { excludeArtifact: true });
+  if (_renderInFlight) return; // collapse re-entrant calls (Firebase live + initial)
+  _renderInFlight = true;
+  try {
+    const E = window.WinRateEngine;
+    if (!E) { console.error('WinRateEngine not loaded'); _renderInFlight = false; return; }
+    _normalizedAll = E.normalizeJobs(_D['knowify-jobs'].jobs || {}, {});
+    _byGCAllTime = E.byGCAllTime(_normalizedAll, { excludeArtifact: true });
+    _monthlyCache = null; // invalidate
 
-  renderKPIs();
-  renderTierBands();
-  renderTierDistChart();
-  renderHistogram();
-  renderAllGCTable();
-  renderTierShift();
-  renderGCDropdown();
-  renderGCMonthly();
-  renderAggMonthly();
-  renderHeatmap();
-  renderAliasCandidates();
-  renderAliasHistory();
-  populateDatalist();
+    const safe = function (name, fn) {
+      try { fn(); } catch (e) { console.error('[winrates:' + name + ']', e); }
+    };
+    safe('KPIs',          renderKPIs);
+    safe('TierBands',     renderTierBands);
+    safe('TierDistChart', renderTierDistChart);
+    safe('Histogram',     renderHistogram);
+    safe('AllGCTable',    renderAllGCTable);
+    safe('TierShift',     renderTierShift);
+    safe('GCDropdown',    renderGCDropdown);
+    safe('GCMonthly',     renderGCMonthly);
+    safe('AggMonthly',    renderAggMonthly);
+    safe('Heatmap',       renderHeatmap);
+    safe('AliasHistory',  renderAliasHistory);
+    // Defer the expensive O(n²) overlap detection + the 200-entry datalist
+    // build to the next animation frame. The page is interactive immediately;
+    // these arrive ~16ms later.
+    setTimeout(function () {
+      safe('AliasCandidates', renderAliasCandidates);
+      safe('Datalist',        populateDatalist);
+    }, 0);
+  } finally {
+    _renderInFlight = false;
+  }
+}
+
+// Memoizing wrapper around WinRateEngine.monthlySeries with the current
+// window options. Invalidated whenever recomputeAndRender re-normalizes.
+function _getMonthly() {
+  if (_monthlyCache) return _monthlyCache;
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  _monthlyCache = E.monthlySeries(_normalizedAll, {
+    asOf: opts.asOf,
+    lookbackMonths: opts.lookbackMonths || 12,
+    minBidsForSeries: opts.minBids,
+  });
+  return _monthlyCache;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -563,7 +600,7 @@ function renderAllGCTable() {
   });
   tbody.innerHTML = sorted.map(r => {
     const t = tier(r);
-    return `<tr style="cursor:pointer" onclick="selectGC('${escapeAttr(r.gc)}')">
+    return `<tr style="cursor:pointer" onclick="selectGC(${escapeJS(r.gc)})">
       <td><strong>${escapeHtml(r.gc)}</strong></td>
       <td><span class="${t.tag}">${t.label}</span></td>
       <td class="num">${r.bids}</td>
@@ -672,7 +709,7 @@ function renderGCMonthly() {
     cap.textContent = 'No GC selected.';
     return;
   }
-  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12 });
+  const series = _getMonthly();
   const g = series.byGC[_selectedGC];
   const labels = series.months.map(m => m.label);
   if (!g) {
@@ -717,9 +754,7 @@ function renderGCMonthly() {
 }
 
 function renderAggMonthly() {
-  const opts = getOpts();
-  const E = window.WinRateEngine;
-  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12 });
+  const series = _getMonthly();
   // Aggregate across all GCs per month.
   const agg = series.months.map(m => ({ ym: m.ym, label: m.label, wins: 0, losses: 0, pending: 0 }));
   Object.values(series.byGC).forEach(g => {
@@ -759,9 +794,7 @@ function renderAggMonthly() {
 // ────────────────────────────────────────────────────────────────────
 // Cohort heatmap
 function renderHeatmap() {
-  const opts = getOpts();
-  const E = window.WinRateEngine;
-  const series = E.monthlySeries(_normalizedAll, { asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12, minBidsForSeries: opts.minBids });
+  const series = _getMonthly();
   const TOP = 25;
   const list = Object.values(series.byGC).sort((a, b) => b.totalBids - a.totalBids).slice(0, TOP);
   const heatmap = document.getElementById('heatmap');
@@ -791,7 +824,7 @@ function renderHeatmap() {
     ${series.months.map(m => `<div class="heatmap-cell">${m.label.split(' ')[0]}<br>'${m.ym.slice(2,4)}</div>`).join('')}
   </div>`;
   const rows = list.map(g => `
-    <div class="heatmap-row" style="--cols:${cols}" onclick="selectGC('${escapeAttr(g.gc)}')" role="button" style2="cursor:pointer">
+    <div class="heatmap-row" style="--cols:${cols};cursor:pointer" onclick="selectGC(${escapeJS(g.gc)})" role="button">
       <div class="heatmap-cat" title="${escapeAttr(g.gc)}"><strong>${escapeHtml(g.gc)}</strong> · ${g.totalBids}b · ${g.windowWR != null ? g.windowWR + '%' : '—'}</div>
       ${g.series.map(s => `<div class="heatmap-cell" style="background:${colorFor(s.wr)};color:${s.wr == null ? 'var(--txt-muted)' : '#0d0f14'}" title="wins: ${s.wins} / losses: ${s.losses} / pending: ${s.pending}">${s.wr != null ? Math.round(s.wr) : '·'}</div>`).join('')}
     </div>`).join('');
@@ -827,8 +860,8 @@ function renderAliasCandidates() {
         <div class="score">${(c.score * 100).toFixed(0)}%<span class="reason">${c.reason}</span></div>
         <div class="score muted" style="font-size:11px">total: ${c.aBids + c.bBids}</div>
         <div class="actions">
-          <button class="btn-ghost btn-accept" onclick="acceptAlias(${i}, '${escapeAttr(c.a)}', '${escapeAttr(c.b)}', ${c.aBids}, ${c.bBids})">Same — merge</button>
-          <button class="btn-ghost btn-reject" onclick="rejectAlias(${i}, '${escapeAttr(c.a)}', '${escapeAttr(c.b)}')">Different</button>
+          <button class="btn-ghost btn-accept" onclick="acceptAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)}, ${c.aBids}, ${c.bBids})">Same — merge</button>
+          <button class="btn-ghost btn-reject" onclick="rejectAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)})">Different</button>
         </div>
       </div>`;
   }).join('');
@@ -872,7 +905,7 @@ function renderAliasHistory() {
       <div>${escapeHtml(a.alias)}</div>
       <div>${statusBadge(a.status)}</div>
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)">${a.ts ? a.ts.slice(0,10) : '—'}</div>
-      <div style="text-align:right"><button class="btn-del" onclick="deleteAliasUI('${escapeAttr(a.key)}')">Delete</button></div>
+      <div style="text-align:right"><button class="btn-del" onclick="deleteAliasUI(${escapeJS(a.key)})">Delete</button></div>
     </div>`).join('');
 }
 
@@ -910,6 +943,12 @@ function populateDatalist() {
 // Helpers
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function escapeAttr(s) { return escapeHtml(s).replace(/'/g, '&#39;'); }
+// escapeJS produces a value safe to embed inside an HTML attribute as a JS
+// string literal — used for inline onclick="fn(${escapeJS(name)})". Without
+// this, names containing apostrophes (e.g. "McDonald's") break the JS at parse
+// time. JSON.stringify wraps the value in double quotes and escapes specials;
+// HTML-escaping then makes those quotes safe inside attribute="...".
+function escapeJS(s) { return escapeHtml(JSON.stringify(String(s == null ? '' : s))); }
 </script>
 </body>
 </html>
