@@ -80,6 +80,7 @@
     if (typeof DB === 'undefined') throw new Error('DB unavailable');
     input = input || {};
     if (!input.name) throw new Error('name required');
+    if (typeof ensureAnonAuth === 'function') await ensureAnonAuth();
     const name = String(input.name).trim();
     const normName = norm(name);
     if (!normName) throw new Error('name normalized to empty');
@@ -100,6 +101,7 @@
   async function removeExclusion(key) {
     if (typeof DB === 'undefined') throw new Error('DB unavailable');
     if (!key) return;
+    if (typeof ensureAnonAuth === 'function') await ensureAnonAuth();
     await DB.set(_path() + '/' + key, null);
     delete _excl[key];
     _emit();

@@ -105,10 +105,28 @@
     return out;
   }
 
-  // Aggregate by GC with per-year sub-buckets.
+  // Aggregate by GC with per-year sub-buckets + multi-GC tracking + recency.
+  //
+  // MULTI-GC: applyKnowifyRules tags j.isMultiGC when the same project (job
+  // name with the GC stripped) appears under multiple GCs. Those are bids
+  // where multiple GCs were collecting on the same project. Only one of them
+  // ultimately wins; the others may show as "loss" without SFS having actually
+  // been rejected — they just bid through the wrong GC. Per-GC counts of
+  // multi-GC bids contextualize the WR for that GC.
+  //
+  // ADJUSTED WR: an "ambiguous-loss-discounted" rate that excludes multi-GC
+  // losses entirely (treats them as inconclusive rather than as losses against
+  // SFS). Decided count drops accordingly. This is an UPPER bound on the
+  // GC's true WR — if SFS would have lost ALL the multi-GC bids anyway, the
+  // raw WR is correct; if SFS would have won SOME if it had bid through the
+  // GC that ultimately got the project, the adjusted is closer.
+  //
+  // RECENCY: lastBidDate per GC, plus daysSinceLastBid (computed at agg time).
+  // Useful to spot dormant relationships.
   function byGCAllTime(jobs, opts) {
     opts = opts || {};
     const excludeArtifact = opts.excludeArtifact !== false;
+    const todayMs = Date.now();
     const map = {};
     jobs.forEach(function (j) {
       if (!j.gc) return;
@@ -118,18 +136,32 @@
           gc: k,
           bids: 0, wins: 0, losses: 0, pending: 0,
           wonCV: 0, lostCV: 0, pendingCV: 0,
+          // Multi-GC tracking
+          multiGCBids: 0, multiGCWins: 0, multiGCLosses: 0, multiGCPending: 0,
+          multiGCLostCV: 0, multiGCPendingCV: 0,
+          // Per-year breakdown
           byYear: {},
+          // Recency
+          lastBidDate: null,
+          // PlanHub flag
           isArtifact: /^planhub$/i.test(k),
         };
       }
       const r = map[k];
       r.bids++;
+      const isMulti = !!j.isMultiGC;
+      if (isMulti) r.multiGCBids++;
       const yr = j.year || 'unknown';
-      if (!r.byYear[yr]) r.byYear[yr] = { wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0 };
+      if (!r.byYear[yr]) r.byYear[yr] = { wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0, multiGCBids: 0 };
       const yc = r.byYear[yr];
-      if (j.outcome === 'win')       { r.wins++;    r.wonCV    += j.cv; yc.wins++;   yc.wonCV  += j.cv; }
-      else if (j.outcome === 'loss') { r.losses++;  r.lostCV   += j.cv; yc.losses++; yc.lostCV += j.cv; }
-      else                           { r.pending++; r.pendingCV+= j.cv; yc.pending++; }
+      if (isMulti) yc.multiGCBids++;
+      if (j.outcome === 'win')       { r.wins++;    r.wonCV    += j.cv; yc.wins++;   yc.wonCV  += j.cv; if (isMulti) r.multiGCWins++; }
+      else if (j.outcome === 'loss') { r.losses++;  r.lostCV   += j.cv; yc.losses++; yc.lostCV += j.cv; if (isMulti) { r.multiGCLosses++; r.multiGCLostCV += j.cv; } }
+      else                           { r.pending++; r.pendingCV+= j.cv; yc.pending++; if (isMulti) { r.multiGCPending++; r.multiGCPendingCV += j.cv; } }
+      // Recency
+      if (j.createdDate && (r.lastBidDate == null || j.createdDate > r.lastBidDate)) {
+        r.lastBidDate = j.createdDate;
+      }
     });
     const rows = Object.values(map).map(function (r) {
       const decided = r.wins + r.losses;
@@ -140,6 +172,30 @@
       r.wonCV     = +r.wonCV.toFixed(2);
       r.lostCV    = +r.lostCV.toFixed(2);
       r.pendingCV = +r.pendingCV.toFixed(2);
+
+      // Adjusted WR — excludes multi-GC losses from the denominator.
+      const adjLosses = r.losses - r.multiGCLosses;
+      const adjDecided = r.wins + adjLosses;
+      r.adjustedDecided = adjDecided;
+      r.adjustedWR = adjDecided > 0 ? +(r.wins / adjDecided * 100).toFixed(1) : null;
+      const adjLostCV = r.lostCV - r.multiGCLostCV;
+      const adjDecCV = r.wonCV + adjLostCV;
+      r.adjustedDollarWR = adjDecCV > 0 ? +(r.wonCV / adjDecCV * 100).toFixed(1) : null;
+      r.multiGCLostCV    = +r.multiGCLostCV.toFixed(2);
+      r.multiGCPendingCV = +r.multiGCPendingCV.toFixed(2);
+
+      // Average won/lost bid size — context for "do they award us small or large jobs".
+      r.avgWonCV  = r.wins   > 0 ? +(r.wonCV  / r.wins).toFixed(2)   : null;
+      r.avgLostCV = r.losses > 0 ? +(r.lostCV / r.losses).toFixed(2) : null;
+
+      // Recency
+      if (r.lastBidDate) {
+        const t = new Date(r.lastBidDate).getTime();
+        r.daysSinceLastBid = Math.floor((todayMs - t) / 86400000);
+      } else {
+        r.daysSinceLastBid = null;
+      }
+
       Object.keys(r.byYear).forEach(function (yr) {
         const y = r.byYear[yr];
         y.decided = y.wins + y.losses;
@@ -151,6 +207,45 @@
     }).filter(function (r) { return excludeArtifact ? !r.isArtifact : true; });
     rows.sort(function (a, b) { return b.bids - a.bids; });
     return rows;
+  }
+
+  // Per-GC pending breakdown for the Current Bids forecast panel.
+  // For each GC with at least one pending bid, returns:
+  //   gc, pending, pendingCV, multiGCPending, multiGCPendingCV,
+  //   wr, dollarWR (historical, unchanged from byGCAllTime row),
+  //   expectedWins  = pending  * (wr / 100)
+  //   expectedWinCV = pendingCV * (dollarWR / 100)
+  //   sample = decided (informs confidence — small samples make the rate noisy)
+  // Sorted by expectedWinCV desc.
+  function pendingByGC(byGCRows, opts) {
+    opts = opts || {};
+    const minSample = opts.minSampleForRate != null ? opts.minSampleForRate : 5;
+    const out = [];
+    (byGCRows || []).forEach(function (r) {
+      if (!r.pending) return;
+      const usableRate = (r.decided != null ? r.decided : (r.wins + r.losses)) >= minSample && r.wr != null;
+      const wr = usableRate ? r.wr : null;
+      const dwr = usableRate && r.dollarWR != null ? r.dollarWR : null;
+      out.push({
+        gc:               r.gc,
+        pending:          r.pending,
+        pendingCV:        r.pendingCV,
+        multiGCPending:   r.multiGCPending || 0,
+        multiGCPendingCV: r.multiGCPendingCV || 0,
+        wr:               wr,
+        dollarWR:         dwr,
+        decided:          r.decided != null ? r.decided : (r.wins + r.losses),
+        sampleAdequate:   usableRate,
+        expectedWins:     usableRate ? +((r.pending * wr / 100)).toFixed(2) : null,
+        expectedWinCV:    usableRate && dwr != null ? +((r.pendingCV * dwr / 100)).toFixed(2) : null,
+      });
+    });
+    out.sort(function (a, b) {
+      const av = a.expectedWinCV != null ? a.expectedWinCV : -1;
+      const bv = b.expectedWinCV != null ? b.expectedWinCV : -1;
+      return bv - av;
+    });
+    return out;
   }
 
   // Hard min-bids filter — drops GCs entirely.
@@ -321,6 +416,7 @@
     window.WinRateEngine = {
       normalizeFromRules: normalizeFromRules,
       byGCAllTime: byGCAllTime,
+      pendingByGC: pendingByGC,
       applyMinBids: applyMinBids,
       yearList: yearList,
       classifyTiers: classifyTiers,

@@ -17,6 +17,25 @@ function getDB() {
   return _db;
 }
 
+// Anonymous Firebase Auth — called before writes when the page allows mutation.
+// The Firebase Realtime DB security rules require auth != null for writes under
+// /dashboard. Reads are open. Pages that only read (forecasts, customers, etc.)
+// don't need to call this. Pages that write (admin, winrates) do.
+//
+// Idempotent: if already signed in, returns the current user. If firebase.auth
+// is unavailable (page didn't load firebase-auth.js), this becomes a no-op.
+async function ensureAnonAuth() {
+  if (typeof firebase === 'undefined' || !firebase.auth) return null;
+  try {
+    if (firebase.auth().currentUser) return firebase.auth().currentUser;
+    const cred = await firebase.auth().signInAnonymously();
+    return cred.user;
+  } catch (e) {
+    console.error('Anonymous auth failed:', e);
+    throw e;
+  }
+}
+
 // Safe Firebase key: replace characters Firebase forbids in keys.
 // Defined before sanitize() because sanitize() now uses it on every key.
 function safeKey(str) {

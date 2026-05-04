@@ -40,15 +40,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=20"></script>
-<script src="../core/utils.js?v=20"></script>
-<script src="../core/gc-segmentation.js?v=20"></script>
-<script src="../core/gc-aliases.js?v=20"></script>
-<script src="../core/gc-exclusions.js?v=20"></script>
-<script src="../core/winrate-engine.js?v=20"></script>
-<script src="../core/dso-reference.js?v=20"></script>
-<script src="../core/dash.js?v=20"></script>
-<script src="../core/nav.js?v=20"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="../core/firebase.js?v=21"></script>
+<script src="../core/utils.js?v=21"></script>
+<script src="../core/gc-segmentation.js?v=21"></script>
+<script src="../core/gc-aliases.js?v=21"></script>
+<script src="../core/gc-exclusions.js?v=21"></script>
+<script src="../core/winrate-engine.js?v=21"></script>
+<script src="../core/dso-reference.js?v=21"></script>
+<script src="../core/dash.js?v=21"></script>
+<script src="../core/nav.js?v=21"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -252,6 +253,36 @@ a{color:inherit;text-decoration:none}
       <div class="chart-wrap h360"><canvas id="chart-yoy"></canvas></div>
     </div>
 
+    <!-- ═══════ CURRENT PENDING BIDS · expected wins by GC ═══════ -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Current pending bids · expected wins by GC</span>
+      <span class="hint">forward-looking · pending count × historical WR · multi-GC count carved out</span>
+    </div>
+    <div class="page-note" style="border-left-color:var(--green);background:rgba(62,207,142,.06);margin-bottom:14px">
+      <b>What this is:</b> for each GC with an active pending bid, the historical WR (count + $) is applied to that GC's pending volume to estimate likely wins.
+      Multi-GC bids are flagged separately — these are projects where multiple GCs were collecting bids on the same opportunity, so a "loss" through one of them isn't necessarily a loss against SFS — only one GC ultimately gets the project. Below, GCs with fewer than 5 historical decided bids show no rate (not enough sample).
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>Per-GC pending forecast</span><span class="meta" id="pending-meta">—</span></div>
+      <div class="kpi-row" id="pending-kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px"></div>
+      <div class="scroll-y scroll-x">
+        <table class="t" id="t-pending">
+          <thead><tr>
+            <th>GC</th>
+            <th class="num">Pending</th>
+            <th class="num">Pending $</th>
+            <th class="num">Multi-GC pending</th>
+            <th class="num">Hist WR%</th>
+            <th class="num">Hist $-WR%</th>
+            <th class="num">Decided sample</th>
+            <th class="num">Expected wins</th>
+            <th class="num">Expected $</th>
+          </tr></thead><tbody></tbody>
+        </table>
+      </div>
+      <div class="cap">Multi-GC pending = bids on projects where multiple GCs are also bidding on the same project (job name with the GC stripped is shared). Only one GC ultimately gets the project; SFS may bid through multiple of them. The expected-wins formula doesn't discount these (the historical WR already absorbs them implicitly), but the count is shown so you know how much of the pending volume has multi-GC ambiguity.</div>
+    </div>
+
     <!-- All GCs table -->
     <div class="section-label">
       <span><span class="accent">▸</span>All GCs · all-time with year columns</span>
@@ -412,6 +443,13 @@ loadDashboard(function (D, raw) {
   document.getElementById('content').style.display = 'block';
   setMeta(D);
 
+  // Anonymous auth — required by Firebase rules for writes (alias/exclusion saves).
+  // Reads work without it; we kick off auth in the background so the first
+  // accept/reject/exclude click doesn't have to wait for sign-in.
+  if (typeof ensureAnonAuth === 'function') {
+    ensureAnonAuth().catch(e => console.warn('Anon auth pre-warm failed:', e));
+  }
+
   // Default trend anchor = today
   document.getElementById('ctrl-anchor').value = new Date().toISOString().slice(0, 10);
 
@@ -481,6 +519,7 @@ function recomputeAndRender() {
     safe('TierDistChart', renderTierDistChart);
     safe('Histogram',     renderHistogram);
     safe('YoY',           renderYearOverYear);
+    safe('Pending',       renderPendingBids);
     safe('AllGCTable',    renderAllGCTable);
     // TREND
     safe('GCDropdown',    renderGCDropdown);
@@ -685,6 +724,68 @@ function renderYearOverYear() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Current Pending Bids — forward-looking expected wins by GC.
+// Pending count × historical WR. Multi-GC pending called out separately.
+function renderPendingBids() {
+  const E = window.WinRateEngine;
+  const opts = getOpts();
+  // Use the PRE-min-bids list so we can show pending bids even from GCs
+  // that wouldn't qualify for tier classification — but mark sample as
+  // inadequate so the user knows the rate is noise.
+  const rows = E.pendingByGC(_byGCRaw, { minSampleForRate: opts.minBids });
+  const tbody = document.querySelector('#t-pending tbody');
+  const meta  = document.getElementById('pending-meta');
+  const kpiRow = document.getElementById('pending-kpi-row');
+
+  if (!rows.length) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="empty">No pending bids in the current Knowify export.</td></tr>';
+    if (meta)  meta.textContent = '0 pending';
+    if (kpiRow) kpiRow.innerHTML = '';
+    return;
+  }
+
+  // Roll-up KPIs
+  const totalPending     = rows.reduce((s, r) => s + r.pending, 0);
+  const totalPendingCV   = rows.reduce((s, r) => s + r.pendingCV, 0);
+  const totalMultiGC     = rows.reduce((s, r) => s + r.multiGCPending, 0);
+  const totalMultiGCCV   = rows.reduce((s, r) => s + r.multiGCPendingCV, 0);
+  const totalExpWins     = rows.reduce((s, r) => s + (r.expectedWins  || 0), 0);
+  const totalExpCV       = rows.reduce((s, r) => s + (r.expectedWinCV || 0), 0);
+  const ratedCount       = rows.filter(r => r.sampleAdequate).length;
+
+  if (meta) meta.textContent = totalPending + ' pending across ' + rows.length + ' GCs · ' + ratedCount + ' rateable (≥' + opts.minBids + ' decided)';
+
+  const kpi = (label, value, opts2 = {}) => `
+    <div class="kpi" style="--kpi-color:var(--${opts2.color || 'border-bright'})">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${opts2.color || ''}">${value}</div>
+      <div class="kpi-sub">${opts2.sub || '&nbsp;'}</div>
+    </div>`;
+  kpiRow.innerHTML = [
+    kpi('Pending bids',  String(totalPending), { color: 'yellow', sub: fmtK(totalPendingCV) + ' face value' }),
+    kpi('Multi-GC pending', String(totalMultiGC), { color: 'orange', sub: fmtK(totalMultiGCCV) + ' · ' + (totalPending ? Math.round(totalMultiGC/totalPending*100) : 0) + '% of pending' }),
+    kpi('Expected wins',  totalExpWins.toFixed(1), { color: 'green', sub: 'count-WR × pending count (rated GCs)' }),
+    kpi('Expected $',     fmtK(totalExpCV), { color: 'green', sub: '$-WR × pending $ (rated GCs)' }),
+  ].join('');
+
+  tbody.innerHTML = rows.map(r => {
+    const wrClass = r.wr == null ? 'muted' : r.wr >= 70 ? 'green' : r.wr >= 30 ? 'blue' : r.wr > 0 ? 'orange' : 'red';
+    const sampleNote = r.sampleAdequate ? '' : '<span title="not enough decided history" class="muted" style="font-size:10px"> · low-sample</span>';
+    return `<tr style="cursor:pointer" onclick="selectGC(${escapeJS(r.gc)})">
+      <td><strong>${escapeHtml(r.gc)}</strong></td>
+      <td class="num yellow">${r.pending}</td>
+      <td class="num">${fmt(r.pendingCV)}</td>
+      <td class="num ${r.multiGCPending > 0 ? 'orange' : 'muted'}">${r.multiGCPending}${r.multiGCPending > 0 ? ' (' + fmt(r.multiGCPendingCV) + ')' : ''}</td>
+      <td class="num ${wrClass}">${r.wr != null ? r.wr + '%' : '—'}${sampleNote}</td>
+      <td class="num muted">${r.dollarWR != null ? r.dollarWR + '%' : '—'}</td>
+      <td class="num muted">${r.decided}</td>
+      <td class="num ${r.expectedWins != null ? 'green' : 'muted'}">${r.expectedWins != null ? r.expectedWins.toFixed(1) : '—'}</td>
+      <td class="num ${r.expectedWinCV != null ? 'green' : 'muted'}">${r.expectedWinCV != null ? fmt(r.expectedWinCV) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ────────────────────────────────────────────────────────────────────
 // All GCs table (with year columns)
 let _allGCSort = { key: 'bids', dir: 'desc' };
 function renderAllGCTable() {
@@ -694,19 +795,25 @@ function renderAllGCTable() {
   const headEl = document.getElementById('t-allgc-head');
   const tbody  = document.querySelector('#t-allgc tbody');
 
-  // Build header
+  // Build header — Multi-GC and Adj WR% added inline so the user sees the
+  // ambiguity context next to the raw numbers. Avg Won and Last Bid added
+  // as recency/size context.
   const FIXED_COLS = [
-    { key: 'gc',       label: 'GC',         numeric: false },
-    { key: 'tier',     label: 'Tier',       numeric: false },
-    { key: 'bids',     label: 'Bids',       numeric: true },
-    { key: 'wins',     label: 'Won',        numeric: true },
-    { key: 'losses',   label: 'Lost',       numeric: true },
-    { key: 'pending',  label: 'Pending',    numeric: true },
-    { key: 'wr',       label: 'WR%',        numeric: true },
-    { key: 'dollarWR', label: '$-WR%',      numeric: true },
-    { key: 'wonCV',    label: 'Won $',      numeric: true },
+    { key: 'gc',          label: 'GC',          numeric: false },
+    { key: 'tier',        label: 'Tier',        numeric: false },
+    { key: 'bids',        label: 'Bids',        numeric: true },
+    { key: 'wins',        label: 'Won',         numeric: true },
+    { key: 'losses',      label: 'Lost',        numeric: true },
+    { key: 'pending',     label: 'Pending',     numeric: true },
+    { key: 'multiGCBids', label: 'Multi-GC',    numeric: true, title: 'Number of bids on projects where multiple GCs are also bidding (same project name, different GC). Multi-GC losses may be ambiguous.' },
+    { key: 'wr',          label: 'WR%',         numeric: true },
+    { key: 'adjustedWR',  label: 'Adj WR%',     numeric: true, title: 'Win rate excluding multi-GC losses from the denominator (upper bound — assumes SFS would have lost all multi-GC bids regardless).' },
+    { key: 'dollarWR',    label: '$-WR%',       numeric: true },
+    { key: 'wonCV',       label: 'Won $',       numeric: true },
+    { key: 'avgWonCV',    label: 'Avg Won $',   numeric: true, title: 'Average contract value of won bids — shows whether this GC awards us small or large jobs.' },
+    { key: 'daysSinceLastBid', label: 'Last bid', numeric: true, title: 'Days since the most recent bid through this GC (recency / dormant-relationship indicator).' },
   ];
-  const headHtml = FIXED_COLS.map(c => `<th class="${c.numeric?'num':''}" data-sort-key="${c.key}">${c.label}</th>`).join('')
+  const headHtml = FIXED_COLS.map(c => `<th class="${c.numeric?'num':''}" data-sort-key="${c.key}"${c.title ? ' title="'+c.title.replace(/"/g,'&quot;')+'"' : ''}>${c.label}</th>`).join('')
     + years.map(y => `<th class="num" data-sort-key="yr_${y}">${y}</th>`).join('')
     + '<th></th>'; // exclude action column
   headEl.innerHTML = headHtml;
@@ -750,8 +857,24 @@ function renderAllGCTable() {
 
   tbody.innerHTML = sorted.map(r => {
     const t = tier(r);
-    const wrClass = r.wr != null && r.wr >= 70 ? 'green' : r.wr != null && r.wr >= 30 ? 'blue' : r.wr === 0 ? 'red' : 'orange';
-    const yrCols = years.map(y => '<td class="num yr-cell">' + yrCell(r.byYear && r.byYear[y]) + '</td>').join('');
+    const wrClass    = r.wr != null && r.wr >= 70 ? 'green' : r.wr != null && r.wr >= 30 ? 'blue' : r.wr === 0 ? 'red' : 'orange';
+    const adjClass   = r.adjustedWR != null && r.adjustedWR >= 70 ? 'green' : r.adjustedWR != null && r.adjustedWR >= 30 ? 'blue' : r.adjustedWR === 0 ? 'red' : 'orange';
+    const yrCols     = years.map(y => '<td class="num yr-cell">' + yrCell(r.byYear && r.byYear[y]) + '</td>').join('');
+    // Multi-GC pct of total bids
+    const multiGCPct = r.bids > 0 ? Math.round((r.multiGCBids || 0) / r.bids * 100) : 0;
+    const multiGCCell = r.multiGCBids > 0
+      ? '<span class="orange" title="' + (r.multiGCWins||0) + 'W / ' + (r.multiGCLosses||0) + 'L / ' + (r.multiGCPending||0) + 'p">' + r.multiGCBids + ' (' + multiGCPct + '%)</span>'
+      : '<span class="muted">0</span>';
+    // Adjusted WR cell — only show if there's a meaningful difference from raw WR
+    const adjCell = r.adjustedWR != null
+      ? (r.multiGCBids > 0 ? '<span class="' + adjClass + '">' + r.adjustedWR + '%</span>' : '<span class="muted">' + r.adjustedWR + '%</span>')
+      : '<span class="muted">—</span>';
+    // Days since last bid — color stale (>180d) in orange, very stale (>365d) red
+    let lastBidCell = '<span class="muted">—</span>';
+    if (r.daysSinceLastBid != null) {
+      const cls = r.daysSinceLastBid > 365 ? 'red' : r.daysSinceLastBid > 180 ? 'orange' : 'muted';
+      lastBidCell = '<span class="' + cls + '" title="last bid created ' + (r.lastBidDate || 'unknown') + '">' + r.daysSinceLastBid + 'd ago</span>';
+    }
     return `<tr style="cursor:pointer" onclick="selectGC(${escapeJS(r.gc)})">
       <td><strong>${escapeHtml(r.gc)}</strong></td>
       <td><span class="${t.tag}">${t.label}</span></td>
@@ -759,9 +882,13 @@ function renderAllGCTable() {
       <td class="num green">${r.wins}</td>
       <td class="num red">${r.losses}</td>
       <td class="num muted">${r.pending}</td>
+      <td class="num">${multiGCCell}</td>
       <td class="num ${wrClass}">${r.wr != null ? r.wr + '%' : '—'}</td>
+      <td class="num">${adjCell}</td>
       <td class="num muted">${r.dollarWR != null ? r.dollarWR + '%' : '—'}</td>
       <td class="num">${fmt(r.wonCV)}</td>
+      <td class="num muted">${r.avgWonCV != null ? fmt(r.avgWonCV) : '—'}</td>
+      <td class="num">${lastBidCell}</td>
       ${yrCols}
       <td><button class="btn-exclude" onclick="event.stopPropagation(); excludeGCFromTable(${escapeJS(r.gc)})" title="Add this name to exclusions (drops it from the analysis)">drop</button></td>
     </tr>`;

@@ -166,6 +166,7 @@
   async function addAlias({ primary, alias, status, note }) {
     if (typeof DB === 'undefined') throw new Error('DB unavailable');
     if (!primary || !alias) throw new Error('primary and alias required');
+    if (typeof ensureAnonAuth === 'function') await ensureAnonAuth();
     const key = _makeKey(primary, alias);
     const entry = {
       primary: String(primary).trim(),
@@ -184,6 +185,7 @@
   async function deleteAlias(key) {
     if (typeof DB === 'undefined') throw new Error('DB unavailable');
     if (!key) return;
+    if (typeof ensureAnonAuth === 'function') await ensureAnonAuth();
     await DB.set(_path() + '/' + key, null);
     delete _aliases[key];
     _emit();
