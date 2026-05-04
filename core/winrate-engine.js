@@ -1,38 +1,39 @@
 // ════════════════════════════════════════════════════════════════════════
-// Win-Rate Engine — per-GC win rate over time + tier classification
+// Win-Rate Engine — per-GC win rate + tier classification
 // ════════════════════════════════════════════════════════════════════════
 //
-// Powers reports/winrates.html. Independent from dash.js / applyKnowifyRules
-// because it needs to apply the LIVE Firebase aliases (via GCAliases.resolveGCName)
-// before grouping. dash.js's applyKnowifyRules only knows the static aliases
-// in gc-segmentation.js — using it here would fragment GCs with newly-curated
-// aliases.
+// Powers reports/winrates.html. Consumes the canonical Knowify outcome
+// classification from dash.js's applyKnowifyRules() — which applies the
+// four SFS rules (Rejected→loss, Active→win, Closed with invoiced=0→loss,
+// stale Bidding→loss, otherwise→pending) and excludes the relationship
+// channel — so the win/loss/pending split here matches every other page.
+//
+// On top of that canonical classification, this engine layers:
+//   • LIVE alias resolution via window.GCAliases.resolveGCName (user-curated
+//     merges from /gc-aliases/ in Firebase) — applyKnowifyRules only does
+//     the static legacy alias map, so we re-canonicalize.
+//   • EXCLUSION filter via window.GCExclusions.isExcluded — drops names that
+//     aren't real GCs (the company itself, vendors, location strings,
+//     project descriptors like "Phase 1" / "Change Order" / "Package A").
+//   • Hard MIN-BIDS cutoff — GCs below the threshold are removed from
+//     analysis, not just labeled "below sample".
+//   • Per-year breakdown — wins/losses/pending split out by job.createdDate
+//     year, so the all-GCs table can show year-over-year columns.
 //
 // Functions exposed via window.WinRateEngine:
-//   • normalizeJobs(jobsObj, opts)     — Knowify {Active, Closed, Bidding, Rejected}
-//                                        → flat list of {jobName, gc, outcome, cv, createdDate, decisionMonth}
-//   • byGCAllTime(jobs, opts)          — { gc, bids, wins, losses, pending, wr, dollarWR, wonCV, lostCV, pendingCV }
-//   • classifyTiers(byGC, opts)        — { T1: [...], T2: [...], T3: [...], T0: [...], belowSample: [...], counts, summary }
-//   • monthlySeries(jobs, opts)        — { months: [{ym, label}], byGC: { gcName: { monthly: {ym: {wins,losses,wr}}, total } } }
-//   • tierShift(jobsCurr, jobsPrev, opts) — GCs whose tier moved between two windows
-//
-// CONTEXT.md rules respected:
-//   §2.4 partial-year strict rule: monthly buckets are honest about coverage; only
-//        decided bids count toward a month's WR (pending excluded).
-//   §8.0 Actionability Rule: this engine produces *descriptions* only; the page
-//        doesn't say "pursue this GC" or "stop bidding that one".
-//
-// Outcome mapping (matches applyKnowifyRules conventions):
-//   status === 'Active' || 'Closed'  → 'win'
-//   status === 'Rejected'            → 'loss'
-//   status === 'Bidding'             → 'pending'
-//
-// Bucket-by date: we use createdDate (when the bid was placed) — NOT decision
-// date, because Knowify exports don't reliably expose decision date. So a
-// month's win rate = "of bids created in this month, what fraction has been
-// won so far". This is a cohort view, which is more interpretable than
-// decision-date view (where decisions cluster lumpily).
-//
+//   • normalizeFromRules(D)           — runs applyKnowifyRules, layers live
+//                                        alias resolution + exclusion filter,
+//                                        returns flat job list.
+//   • byGCAllTime(jobs, opts)         — { gc, bids, wins, losses, pending,
+//                                          wr, dollarWR, wonCV, lostCV,
+//                                          pendingCV, byYear:{yr:{...}} }[]
+//   • applyMinBids(rows, minBids)     — filter to rows with bids ≥ minBids.
+//   • classifyTiers(rows, opts)       — { T1, T2, T3, T0, counts, summary }
+//   • monthlySeries(jobs, opts)       — { months, byGC } for trend charts.
+//   • tierShift(curr, prev, opts)     — list of GCs that moved tiers.
+//   • filterByWindow(jobs, start, end)
+//   • yearList(rows, capRecent)       — sorted list of years present, capped
+//                                        at the most recent N (for table).
 // ════════════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -52,87 +53,83 @@
     return MO[d.getMonth()] + ' ' + d.getFullYear();
   }
 
-  function _outcomeFor(status) {
-    if (status === 'Active' || status === 'Closed') return 'win';
-    if (status === 'Rejected') return 'loss';
-    return 'pending'; // Bidding (or anything unknown) → pending
-  }
-
-  // Knowify "Project - Location - Company" naming. Last segment = GC.
-  // Falls back to job.client when the name doesn't follow the pattern.
-  function _extractGC(j) {
-    if (!j) return null;
-    const name = (j.jobName || j.name || '').toString().trim();
-    if (name) {
-      const parts = name.split(' - ').map(s => s.trim()).filter(Boolean);
-      if (parts.length >= 2) return parts[parts.length - 1];
-    }
-    return j.client || null;
-  }
-
-  // Apply alias resolution via the user-curated live store (with legacy
-  // fallback). Safe even when GCAliases isn't loaded yet.
-  function _resolve(rawName) {
+  function _resolveAlias(rawName) {
     if (typeof window !== 'undefined' && window.GCAliases && typeof window.GCAliases.resolveGCName === 'function') {
       return window.GCAliases.resolveGCName(rawName);
-    }
-    if (typeof window !== 'undefined' && typeof window.canonicalGCName === 'function') {
-      return window.canonicalGCName(rawName);
     }
     return rawName;
   }
 
-  // Normalize the Knowify jobs object into a flat list this engine consumes.
-  function normalizeJobs(jobsObj, opts) {
-    opts = opts || {};
-    if (!jobsObj) return [];
-    const sheets = ['Active', 'Closed', 'Bidding', 'Rejected'];
+  function _isExcluded(name) {
+    if (typeof window !== 'undefined' && window.GCExclusions && typeof window.GCExclusions.isExcluded === 'function') {
+      return window.GCExclusions.isExcluded(name);
+    }
+    return false;
+  }
+
+  // Run applyKnowifyRules to get the canonical outcome + GC, then layer live
+  // alias resolution and exclusion filtering on top.
+  // PlanHub stays as PlanHub from the rules engine — caller decides whether
+  // to exclude (CONTEXT.md §2.5: PlanHub's 0% WR is a Knowify reporting
+  // artifact). byGCAllTime excludes it via the artifact flag by default.
+  function normalizeFromRules(D) {
+    if (!D || !D['knowify-jobs'] || !D['knowify-jobs'].jobs) return [];
+    if (typeof applyKnowifyRules !== 'function') {
+      console.error('WinRateEngine.normalizeFromRules: applyKnowifyRules missing — load core/dash.js first.');
+      return [];
+    }
+    const R = applyKnowifyRules(D['knowify-jobs'].jobs);
     const out = [];
-    sheets.forEach(function (s) {
-      const arr = jobsObj[s] || [];
-      arr.forEach(function (j) {
-        const rawGC = _extractGC(j);
-        if (!rawGC) return;
-        const gc = _resolve(rawGC);
-        const cd = _toDate(j.createdDate);
-        out.push({
-          jobName: j.jobName || j.name || '',
-          rawGC: rawGC,
-          gc: gc,
-          outcome: _outcomeFor(j.status || s),
-          status:  j.status || s,
-          cv:      +j.contractTotal || 0,
-          createdDate: cd ? cd.toISOString().slice(0, 10) : null,
-          ym:      cd ? _ymKey(cd) : null,
-          state:   j.state || null,
-          salesLead: j.salesLead || null,
-        });
+    R.competitive.jobs.forEach(function (j) {
+      const baseGC = j._extractedGC; // canonical via static map + extractGCFromJob
+      if (!baseGC) return;
+      const finalGC = _resolveAlias(baseGC); // layer live aliases
+      if (_isExcluded(finalGC)) return;       // drop excluded names
+      const cd = _toDate(j.createdDate);
+      out.push({
+        jobName: j.jobName || j.name || '',
+        rawGC:   baseGC,
+        gc:      finalGC,
+        outcome: j.outcome,
+        status:  j.originalStatus || j.status || null,
+        cv:      +j.contractTotal || 0,
+        createdDate: cd ? cd.toISOString().slice(0, 10) : null,
+        ym:      cd ? _ymKey(cd) : null,
+        year:    cd ? cd.getFullYear() : null,
+        ageDays: j.ageDays,
+        reclassReason: j.reclassReason || null,
+        salesLead: j.salesLead || null,
+        isMultiGC: !!j.isMultiGC,
       });
     });
     return out;
   }
 
-  // All-time win-rate aggregation by GC. Pending bids excluded from rate.
-  // Note: PlanHub gets flagged but NOT excluded — caller decides whether to
-  // exclude (per CONTEXT.md, PlanHub's 0% is a Knowify reporting artifact).
+  // Aggregate by GC with per-year sub-buckets.
   function byGCAllTime(jobs, opts) {
     opts = opts || {};
-    const excludeArtifact = opts.excludeArtifact !== false; // default true
+    const excludeArtifact = opts.excludeArtifact !== false;
     const map = {};
     jobs.forEach(function (j) {
       if (!j.gc) return;
       const k = j.gc;
       if (!map[k]) {
         map[k] = {
-          gc: k, bids: 0, wins: 0, losses: 0, pending: 0,
+          gc: k,
+          bids: 0, wins: 0, losses: 0, pending: 0,
           wonCV: 0, lostCV: 0, pendingCV: 0,
+          byYear: {},
           isArtifact: /^planhub$/i.test(k),
         };
       }
-      map[k].bids++;
-      if (j.outcome === 'win')      { map[k].wins++;    map[k].wonCV    += j.cv; }
-      else if (j.outcome === 'loss'){ map[k].losses++;  map[k].lostCV   += j.cv; }
-      else                          { map[k].pending++; map[k].pendingCV+= j.cv; }
+      const r = map[k];
+      r.bids++;
+      const yr = j.year || 'unknown';
+      if (!r.byYear[yr]) r.byYear[yr] = { wins: 0, losses: 0, pending: 0, wonCV: 0, lostCV: 0 };
+      const yc = r.byYear[yr];
+      if (j.outcome === 'win')       { r.wins++;    r.wonCV    += j.cv; yc.wins++;   yc.wonCV  += j.cv; }
+      else if (j.outcome === 'loss') { r.losses++;  r.lostCV   += j.cv; yc.losses++; yc.lostCV += j.cv; }
+      else                           { r.pending++; r.pendingCV+= j.cv; yc.pending++; }
     });
     const rows = Object.values(map).map(function (r) {
       const decided = r.wins + r.losses;
@@ -143,25 +140,44 @@
       r.wonCV     = +r.wonCV.toFixed(2);
       r.lostCV    = +r.lostCV.toFixed(2);
       r.pendingCV = +r.pendingCV.toFixed(2);
+      Object.keys(r.byYear).forEach(function (yr) {
+        const y = r.byYear[yr];
+        y.decided = y.wins + y.losses;
+        y.wr = y.decided > 0 ? +(y.wins / y.decided * 100).toFixed(1) : null;
+        y.wonCV  = +y.wonCV.toFixed(2);
+        y.lostCV = +y.lostCV.toFixed(2);
+      });
       return r;
     }).filter(function (r) { return excludeArtifact ? !r.isArtifact : true; });
     rows.sort(function (a, b) { return b.bids - a.bids; });
     return rows;
   }
 
-  // Classify into Win-Rate Tiers per user's spec:
-  //   T1: ≥70% WR, ≥minBids decided
-  //   T2: 30-69%
-  //   T3: 1-29%
-  //   T0: 0% (separated out from T3)
-  //   belowSample: <minBids decided
-  // Default minBids = 5.
-  function classifyTiers(byGC, opts) {
+  // Hard min-bids filter — drops GCs entirely.
+  function applyMinBids(rows, minBids) {
+    minBids = minBids != null ? minBids : 5;
+    return (rows || []).filter(function (r) { return (r.bids || 0) >= minBids; });
+  }
+
+  // Years present in the data, sorted ascending.
+  // capRecent: keep only the most recent N years.
+  function yearList(rows, capRecent) {
+    const set = new Set();
+    (rows || []).forEach(function (r) {
+      Object.keys(r.byYear || {}).forEach(function (y) { if (y !== 'unknown') set.add(parseInt(y, 10)); });
+    });
+    let years = Array.from(set).filter(function (y) { return !isNaN(y); }).sort(function (a, b) { return a - b; });
+    if (capRecent && years.length > capRecent) years = years.slice(years.length - capRecent);
+    return years;
+  }
+
+  // Tier classification.
+  function classifyTiers(rows, opts) {
     opts = opts || {};
     const minBids = opts.minBids != null ? opts.minBids : 5;
     const useDollar = !!opts.useDollar;
     const T1 = [], T2 = [], T3 = [], T0 = [], belowSample = [];
-    (byGC || []).forEach(function (r) {
+    (rows || []).forEach(function (r) {
       const decided = r.decided != null ? r.decided : (r.wins + r.losses);
       if (decided < minBids) { belowSample.push(r); return; }
       const rate = useDollar ? r.dollarWR : r.wr;
@@ -174,45 +190,29 @@
     [T1, T2, T3, T0, belowSample].forEach(function (a) {
       a.sort(function (x, y) { return (y.bids || 0) - (x.bids || 0); });
     });
-    const sumBids = function (a) { return a.reduce(function (s, r) { return s + (r.bids || 0); }, 0); };
-    const sumWonCV = function (a) { return a.reduce(function (s, r) { return s + (r.wonCV || 0); }, 0); };
+    const sumBids   = function (a) { return a.reduce(function (s, r) { return s + (r.bids || 0); }, 0); };
+    const sumWonCV  = function (a) { return a.reduce(function (s, r) { return s + (r.wonCV || 0); }, 0); };
     const sumPendCV = function (a) { return a.reduce(function (s, r) { return s + (r.pendingCV || 0); }, 0); };
     return {
       T1: T1, T2: T2, T3: T3, T0: T0, belowSample: belowSample,
-      counts: {
-        T1: T1.length, T2: T2.length, T3: T3.length, T0: T0.length, belowSample: belowSample.length,
-      },
+      counts: { T1: T1.length, T2: T2.length, T3: T3.length, T0: T0.length, belowSample: belowSample.length },
       summary: {
         T1: { gcs: T1.length, bids: sumBids(T1), wonCV: sumWonCV(T1), pendingCV: sumPendCV(T1) },
         T2: { gcs: T2.length, bids: sumBids(T2), wonCV: sumWonCV(T2), pendingCV: sumPendCV(T2) },
         T3: { gcs: T3.length, bids: sumBids(T3), wonCV: sumWonCV(T3), pendingCV: sumPendCV(T3) },
         T0: { gcs: T0.length, bids: sumBids(T0), wonCV: sumWonCV(T0), pendingCV: sumPendCV(T0) },
-        minBids: minBids,
-        useDollar: useDollar,
+        minBids: minBids, useDollar: useDollar,
       },
     };
   }
 
-  // Build a monthly time-series for win-rate-over-time analysis.
-  // Window is anchored at `asOf` (default: today), going back `lookbackMonths`
-  // months (default: 12).
-  // Returns:
-  //   {
-  //     months: [{ym: '2025-05', label: 'May 2025', start, end}, ...],
-  //     byGC:   { gcName: {
-  //                 gc, totalBids, totalWins, totalLosses, totalPending,
-  //                 monthly: { ym: { wins, losses, pending, wr } },
-  //                 series:  [ {ym, wr, decided}, ... ]   // aligned with `months` for charting
-  //              } }
-  //   }
+  // Trend chart series. Cohort by bid-creation month.
   function monthlySeries(jobs, opts) {
     opts = opts || {};
     const asOf = _toDate(opts.asOf) || new Date();
     asOf.setHours(0, 0, 0, 0);
     const lookback = opts.lookbackMonths || 12;
-    const minBids = opts.minBidsForSeries != null ? opts.minBidsForSeries : 0;
 
-    // Build month windows, oldest first.
     const months = [];
     for (let i = lookback - 1; i >= 0; i--) {
       const start = new Date(asOf.getFullYear(), asOf.getMonth() - i, 1);
@@ -247,7 +247,6 @@
     });
 
     Object.values(byGC).forEach(function (g) {
-      // Compute per-month WR + aligned series.
       g.series = months.map(function (m) {
         const cell = g.monthly[m.ym] || { wins: 0, losses: 0, pending: 0 };
         const decided = cell.wins + cell.losses;
@@ -258,19 +257,9 @@
       g.windowWR = decTotal > 0 ? +(g.totalWins / decTotal * 100).toFixed(1) : null;
     });
 
-    // Optionally drop GCs with too few bids in window for cleaner charting.
-    if (minBids > 0) {
-      Object.keys(byGC).forEach(function (k) {
-        if (byGC[k].totalBids < minBids) delete byGC[k];
-      });
-    }
-
     return { asOf: asOf.toISOString().slice(0, 10), lookbackMonths: lookback, months: months, byGC: byGC };
   }
 
-  // Compare two windows and return GCs whose tier changed.
-  // jobsCurr / jobsPrev are normalized (from normalizeJobs) — caller can pre-filter
-  // to a date window. Each shift entry: {gc, prevTier, currTier, prevBids, currBids, prevWR, currWR, delta}
   function tierShift(jobsCurr, jobsPrev, opts) {
     opts = opts || {};
     const minBids = opts.minBids != null ? opts.minBids : 5;
@@ -317,8 +306,6 @@
     return shifts;
   }
 
-  // Filter normalized jobs to a date window (inclusive on both ends).
-  // Bids without a valid createdDate are excluded.
   function filterByWindow(jobs, startDate, endDate) {
     const s = _toDate(startDate); const e = _toDate(endDate);
     if (!s || !e) return jobs;
@@ -332,12 +319,20 @@
 
   if (typeof window !== 'undefined') {
     window.WinRateEngine = {
-      normalizeJobs: normalizeJobs,
+      normalizeFromRules: normalizeFromRules,
       byGCAllTime: byGCAllTime,
+      applyMinBids: applyMinBids,
+      yearList: yearList,
       classifyTiers: classifyTiers,
       monthlySeries: monthlySeries,
       tierShift: tierShift,
       filterByWindow: filterByWindow,
+      // Backwards-compat alias for the v=19 page revision (which called normalizeJobs).
+      // The new page (v=20+) uses normalizeFromRules directly.
+      normalizeJobs: function (jobsObj) {
+        const D = { 'knowify-jobs': { jobs: jobsObj } };
+        return normalizeFromRules(D);
+      },
     };
   }
 })();

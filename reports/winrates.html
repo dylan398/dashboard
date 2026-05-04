@@ -1,25 +1,35 @@
 <!DOCTYPE html>
 <!--
-  Win Rates — per-GC win-rate-over-time + tier classification + alias curation.
+  Win Rates — per-GC win-rate analysis with tier classification, alias
+  curation, and exclusion management.
 
   ▶ Read docs/CONTEXT.md §2.5 (Group A/B/C) and §8.0 (Actionability Rule)
     before editing.
 
-    Pure-win-rate version of Group A/B/C. The static gc-segmentation.js was
-    derived from win rates too, but didn't account for GC name overlaps;
-    this page does, by walking the live alias store at /gc-aliases/ and
-    re-running the math each time the user accepts a merge.
+  Page is split into THREE sections, each with clear scope:
 
-    Tiers (over a configurable time window — default last 12 months):
-      T1: ≥70% WR, ≥5 decided bids
-      T2: 30-69% WR, ≥5 decided bids
-      T3: 1-29% WR, ≥5 decided bids
-      T0: 0% WR, ≥5 decided bids (separated from T3 because the pattern
-          differs — chain-locked subs, public-sector incumbents, etc.)
-      Below sample: <5 decided bids
+    1. ALL-TIME — KPIs, tier overview, all-GCs table, year-over-year breakdown.
+       Driven by the SFS Knowify rules (applyKnowifyRules in core/dash.js)
+       so outcome classification matches every other page. Live alias
+       resolution + exclusion filter applied on top. Hard min-bids cutoff.
 
-    The page DESCRIBES the bid book — it doesn't generate "pursue this GC"
-    or "stop bidding that GC" recommendations. SFS bids every job they can.
+    2. TREND — windowed analysis with its own controls. Per-GC monthly chart
+       (cohort by bid-creation month), aggregate WR over time, tier-shift
+       detector (current window vs prior).
+
+    3. CURATION — alias review (auto-detected fuzzy matches with
+       accept/reject), saved alias history, manual alias creator,
+       exclusions panel.
+
+  Tiers (over the GCs that pass min-bids):
+    T1: ≥70% WR
+    T2: 30-69% WR
+    T3: 1-29% WR
+    T0: 0% WR (separated from T3 — different pattern: chain-locked subs,
+        public-sector incumbents, etc.)
+
+  This page DESCRIBES — never recommends "pursue this GC" or "stop bidding
+  that GC". SFS bids every job they can.
 -->
 <html lang="en">
 <head>
@@ -30,14 +40,15 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="../core/firebase.js?v=19"></script>
-<script src="../core/utils.js?v=19"></script>
-<script src="../core/gc-segmentation.js?v=19"></script>
-<script src="../core/gc-aliases.js?v=19"></script>
-<script src="../core/winrate-engine.js?v=19"></script>
-<script src="../core/dso-reference.js?v=19"></script>
-<script src="../core/dash.js?v=19"></script>
-<script src="../core/nav.js?v=19"></script>
+<script src="../core/firebase.js?v=20"></script>
+<script src="../core/utils.js?v=20"></script>
+<script src="../core/gc-segmentation.js?v=20"></script>
+<script src="../core/gc-aliases.js?v=20"></script>
+<script src="../core/gc-exclusions.js?v=20"></script>
+<script src="../core/winrate-engine.js?v=20"></script>
+<script src="../core/dso-reference.js?v=20"></script>
+<script src="../core/dash.js?v=20"></script>
+<script src="../core/nav.js?v=20"></script>
 <style>
 :root{
   --bg-base:#0d0f14;--bg-panel:#13161e;--bg-card:#191d28;--bg-hover:#1e2330;
@@ -57,8 +68,13 @@ a{color:inherit;text-decoration:none}
 .page-meta .stale{color:var(--orange)}
 .page-note{background:var(--bg-card);border-left:3px solid var(--blue);padding:11px 14px;font-size:12.5px;color:var(--txt-secondary);margin-bottom:20px;line-height:1.55}
 .page-note b{color:var(--txt-primary)}
+.page-note code{background:var(--bg-hover);padding:1px 5px;border-radius:2px;font-family:var(--font-mono);font-size:11px;color:var(--txt-primary)}
 
-.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:24px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
+.section-divider{border-top:1px solid var(--border-bright);margin:32px 0 0;padding-top:0}
+.section-banner{font-family:var(--font-display);font-weight:800;font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--yellow);background:linear-gradient(90deg,rgba(245,200,66,.10),transparent);padding:10px 14px;border-left:4px solid var(--yellow);margin:18px 0 14px}
+.section-banner .scope{color:var(--txt-muted);font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:none;margin-left:10px;font-family:var(--font-mono)}
+
+.section-label{font-family:var(--font-display);font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--txt-muted);margin:20px 0 10px;padding-left:2px;display:flex;align-items:center;justify-content:space-between}
 .section-label .accent{color:var(--yellow);margin-right:6px}
 .section-label .hint{color:var(--txt-muted);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none}
 
@@ -75,14 +91,17 @@ a{color:inherit;text-decoration:none}
 .panel-title .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono);text-transform:none;letter-spacing:.04em;font-weight:400}
 
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
 
 .t{width:100%;border-collapse:collapse;font-size:12.5px}
-.t th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel);position:sticky;top:0}
+.t th{text-align:left;padding:9px 10px;font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);font-weight:600;border-bottom:1px solid var(--border-bright);background:var(--bg-panel);position:sticky;top:0;z-index:1}
 .t th.num,.t td.num{text-align:right;font-family:var(--font-mono)}
 .t td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--txt-primary);vertical-align:top}
 .t tr:hover td{background:var(--bg-hover)}
 .t .num.green{color:var(--green)}.t .num.yellow{color:var(--yellow)}.t .num.blue{color:var(--blue)}.t .num.orange{color:var(--orange)}.t .num.muted{color:var(--txt-muted)}.t .num.red{color:var(--red)}
+.t .yr-cell{font-family:var(--font-mono);font-size:11px;text-align:center;white-space:nowrap}
+.t .yr-cell .wl{display:block;font-weight:600;line-height:1.1}
+.t .yr-cell .pct{display:block;color:var(--txt-muted);font-size:10px;margin-top:1px}
+.t .yr-cell .empty{color:var(--txt-muted);font-style:italic;font-size:11px}
 
 .tag-T1{background:rgba(62,207,142,.18);color:var(--green);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
 .tag-T2{background:rgba(74,158,255,.18);color:var(--blue);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em;font-weight:700}
@@ -91,9 +110,10 @@ a{color:inherit;text-decoration:none}
 .tag-LO{background:rgba(138,144,160,.16);color:var(--txt-muted);font-family:var(--font-mono);font-size:10px;padding:2px 7px;border-radius:2px;letter-spacing:.04em}
 
 .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;background:var(--bg-card);border:1px solid var(--border);padding:14px;margin-bottom:14px}
+.controls .scope-note{flex-basis:100%;font-size:11px;color:var(--txt-muted);font-family:var(--font-mono);margin-bottom:6px}
 .ctrl{display:flex;flex-direction:column;gap:4px}
 .ctrl label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);font-family:var(--font-display);font-weight:600}
-.ctrl input,.ctrl select{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:7px 10px;font-size:13px;font-family:var(--font-body);min-width:160px}
+.ctrl input,.ctrl select{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:7px 10px;font-size:13px;font-family:var(--font-body);min-width:140px}
 .ctrl input:focus,.ctrl select:focus{outline:none;border-color:var(--yellow)}
 .btn{background:var(--yellow);color:#000;border:none;padding:9px 16px;font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
 .btn:hover{background:#fdd55a}
@@ -105,37 +125,40 @@ a{color:inherit;text-decoration:none}
 .btn-reject:hover{background:rgba(224,82,82,.24)}
 .btn-del{background:transparent;color:var(--txt-muted);border:1px solid var(--border);padding:4px 10px;font-size:10px;cursor:pointer;font-family:var(--font-mono)}
 .btn-del:hover{color:var(--red);border-color:var(--red)}
+.btn-exclude{background:transparent;color:var(--txt-muted);border:1px solid var(--border);padding:3px 8px;font-size:10px;cursor:pointer;font-family:var(--font-mono);border-radius:2px}
+.btn-exclude:hover{color:var(--red);border-color:var(--red)}
 
 .chart-wrap{position:relative;width:100%}
 .chart-wrap.h280{height:280px}.chart-wrap.h360{height:360px}.chart-wrap.h420{height:420px}
 
 .empty{color:var(--txt-muted);font-style:italic;padding:32px;text-align:center}
 .cap{font-size:11px;color:var(--txt-muted);margin-top:8px;line-height:1.55;font-style:italic}
-.scroll-y{overflow-y:auto;max-height:480px}
-
-.heatmap{overflow-x:auto;font-family:var(--font-mono);font-size:11px}
-.heatmap-row{display:grid;grid-template-columns:200px repeat(var(--cols),minmax(40px,1fr));border-bottom:1px solid var(--border)}
-.heatmap-row.hd{font-family:var(--font-display);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:var(--txt-muted);border-bottom:1px solid var(--border-bright);background:var(--bg-panel)}
-.heatmap-cat{padding:6px 8px;color:var(--txt-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.heatmap-cell{padding:5px;text-align:center;color:var(--txt-primary);border-left:1px solid var(--border)}
+.scroll-y{overflow-y:auto;max-height:520px}
+.scroll-x{overflow-x:auto}
 
 .alias-row{display:grid;grid-template-columns:1.1fr 1.1fr 110px 110px 1fr;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px}
 .alias-row .gc{font-family:var(--font-display);color:var(--txt-primary);font-weight:600}
 .alias-row .meta{font-size:10px;color:var(--txt-muted);font-family:var(--font-mono);margin-top:2px}
-.alias-row .actions{display:flex;gap:6px;justify-content:flex-end}
+.alias-row .actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .alias-row .score{text-align:center;font-family:var(--font-mono);color:var(--yellow)}
 .alias-row .score .reason{display:block;font-size:10px;color:var(--txt-muted);margin-top:2px}
 
 .history-row{display:grid;grid-template-columns:1.2fr 1.2fr 100px 130px 80px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12.5px}
 .history-row.hd{font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);background:var(--bg-panel);font-weight:600;border-bottom:1px solid var(--border-bright)}
 
+.excl-row{display:grid;grid-template-columns:1.4fr 2fr 130px 80px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12.5px}
+.excl-row.hd{font-family:var(--font-display);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-muted);background:var(--bg-panel);font-weight:600;border-bottom:1px solid var(--border-bright)}
+.excl-row .name{color:var(--txt-primary);font-weight:600;font-family:var(--font-display)}
+.excl-row .note{color:var(--txt-secondary);font-size:11.5px}
+
 .manual-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--border-bright);margin-top:14px}
 .manual-form input{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:9px 11px;font-size:13px}
 .manual-form input:focus{outline:none;border-color:var(--yellow)}
 .manual-form label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);font-family:var(--font-display);font-weight:600}
-
-.bar{height:14px;background:var(--bg-hover);border:1px solid var(--border);position:relative;overflow:hidden;border-radius:1px}
-.bar-fill{height:100%;float:left}
+.excl-form{display:grid;grid-template-columns:1.2fr 2fr auto;gap:10px;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--border-bright);margin-top:14px}
+.excl-form input{background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:9px 11px;font-size:13px}
+.excl-form input:focus{outline:none;border-color:var(--yellow)}
+.excl-form label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-muted);font-family:var(--font-display);font-weight:600}
 
 .tier-band{padding:14px 16px;border:1px solid var(--border);border-left:4px solid var(--c);background:var(--bg-card);margin-bottom:6px}
 .tier-band.t1{--c:var(--green)}
@@ -151,16 +174,16 @@ a{color:inherit;text-decoration:none}
 <body>
 <main class="main">
   <div class="page-title">Win Rates</div>
-  <div class="page-sub">Per-GC win-rate-over-time analysis · pure-rate tier classification (T1/T2/T3/T0) · alias curation. Descriptive only — not a "pursue these" recommendation engine.</div>
+  <div class="page-sub">Per-GC win-rate analysis · pure-rate tier classification (T1/T2/T3/T0) · alias + exclusion curation. Descriptive only — not a "pursue these" recommendation engine.</div>
   <div class="page-meta" id="page-meta">—</div>
 
   <div class="page-note">
-    <b>How to read this page:</b> the top KPIs and Tier overview describe the bid book over the
-    selected window. The Possible Aliases panel surfaces likely GC name overlaps (Knowify lets
-    users type freely, so "JPI" and "JPI Companies" land as separate rows). Accepting a pair
-    persists the merge to Firebase, the math re-runs, and the Tier table updates. Reject if
-    they're actually different companies — that decision sticks too. The bid → cash chain
-    (lag, AR, etc.) lives on the Forecasts page; this page is purely about win rates.
+    <b>Where the numbers come from:</b> outcome classification uses the canonical Knowify rules
+    (<code>applyKnowifyRules</code>) — same as every other page. <b>Rejected→loss</b>, <b>Active→win</b>,
+    <b>Closed with $0 invoiced→loss</b> (unbilled), <b>Bidding past stale-threshold→loss</b>, otherwise pending.
+    Relationship-channel jobs are excluded from the rate. Live aliases merge same-GC name variants;
+    excluded names (the company itself, vendors, location strings, project descriptors) are dropped
+    entirely. GCs below the min-bids floor are filtered out.
   </div>
 
   <div id="empty-state" class="empty" style="display:none">
@@ -168,29 +191,17 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <div id="content" style="display:none">
-    <!-- ═══════ TOP KPIs ═══════ -->
-    <div class="kpi-row" id="kpi-row"></div>
 
-    <!-- ═══════ CONTROLS ═══════ -->
-    <div class="section-label"><span><span class="accent">▸</span>Time window</span><span class="hint">Anchor + lookback · drives the monthly chart, heatmap, and tier-shift detector</span></div>
-    <div class="controls" id="controls">
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION 1 · ALL-TIME ANALYSIS
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="section-banner">All-Time Analysis<span class="scope">scope: every decided bid in Knowify · alias-resolved · post-exclusions · ≥ min bids</span></div>
+
+    <!-- All-time min-bids control (separate from trend window) -->
+    <div class="controls" id="alltime-controls" style="margin-bottom:14px">
+      <div class="scope-note">These controls only affect the All-Time section above. The Trend section below has its own separate window.</div>
       <div class="ctrl">
-        <label for="ctrl-anchor">Anchor date</label>
-        <input type="date" id="ctrl-anchor">
-      </div>
-      <div class="ctrl">
-        <label for="ctrl-lookback">Lookback (months)</label>
-        <select id="ctrl-lookback">
-          <option value="3">3 months</option>
-          <option value="6">6 months</option>
-          <option value="12" selected>12 months</option>
-          <option value="24">24 months</option>
-          <option value="36">36 months</option>
-          <option value="0">All time</option>
-        </select>
-      </div>
-      <div class="ctrl">
-        <label for="ctrl-min-bids">Min bids (tier inclusion)</label>
+        <label for="ctrl-min-bids">Min total bids</label>
         <select id="ctrl-min-bids">
           <option value="3">3+</option>
           <option value="5" selected>5+</option>
@@ -205,56 +216,103 @@ a{color:inherit;text-decoration:none}
           <option value="dollar">Dollar ($-weighted)</option>
         </select>
       </div>
-      <div class="ctrl">
-        <label for="ctrl-compare">Compare vs</label>
-        <select id="ctrl-compare">
-          <option value="prev-window" selected>Prior window of same length</option>
-          <option value="all-time-pre">All time before window start</option>
-        </select>
-      </div>
-      <button class="btn" id="btn-apply">Re-run analysis</button>
+      <button class="btn" id="btn-alltime-apply">Re-run all-time</button>
     </div>
 
-    <!-- ═══════ TIER OVERVIEW ═══════ -->
+    <!-- KPIs -->
+    <div class="kpi-row" id="kpi-row"></div>
+
+    <!-- Tier overview -->
     <div class="section-label">
-      <span><span class="accent">▸</span>Tier overview · all-time (after alias resolution)</span>
-      <span class="hint">All bids ever, with active aliases applied · re-runs when an alias is accepted</span>
+      <span><span class="accent">▸</span>Tier overview · post-filter</span>
+      <span class="hint">re-runs when an alias is accepted, an exclusion is added, or min-bids changes</span>
     </div>
     <div id="tier-bands"></div>
 
     <div class="grid-2">
       <div class="panel">
-        <div class="panel-title"><span>Tier Distribution</span><span class="meta">all-time</span></div>
+        <div class="panel-title"><span>Tier distribution</span><span class="meta" id="tier-dist-meta">—</span></div>
         <div class="chart-wrap h280"><canvas id="chart-tier-dist"></canvas></div>
       </div>
       <div class="panel">
-        <div class="panel-title"><span>Win-rate Histogram</span><span class="meta">all GCs ≥ min bids</span></div>
+        <div class="panel-title"><span>Win-rate histogram</span><span class="meta">10-pt bins · 0% bucket separated</span></div>
         <div class="chart-wrap h280"><canvas id="chart-wr-hist"></canvas></div>
       </div>
     </div>
 
+    <!-- Year-by-year aggregate (replaces heatmap) -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>Year-by-year · aggregate</span>
+      <span class="hint">all classified GCs combined · cohort by bid-creation year</span>
+    </div>
     <div class="panel">
-      <div class="panel-title"><span>All GCs · all-time</span><span class="meta">sortable · click GC name to chart its monthly trend</span></div>
-      <div class="scroll-y">
+      <div class="panel-title"><span>Wins / losses by year</span><span class="meta" id="yoy-meta">—</span></div>
+      <div class="chart-wrap h360"><canvas id="chart-yoy"></canvas></div>
+    </div>
+
+    <!-- All GCs table -->
+    <div class="section-label">
+      <span><span class="accent">▸</span>All GCs · all-time with year columns</span>
+      <span class="hint">click a GC name to chart its monthly trend below · sortable headers · year columns show <code>W/L · WR%</code></span>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>GC table</span><span class="meta" id="allgc-meta">—</span></div>
+      <div class="scroll-y scroll-x">
         <table class="t" id="t-allgc">
-          <thead><tr>
-            <th>GC</th><th>Tier</th>
-            <th class="num">Bids</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Pending</th>
-            <th class="num">WR%</th><th class="num">$-WR%</th>
-            <th class="num">Won $</th><th class="num">Pending $</th>
-          </tr></thead><tbody></tbody>
+          <thead><tr id="t-allgc-head"></tr></thead><tbody></tbody>
         </table>
       </div>
     </div>
 
-    <!-- ═══════ TIER SHIFT ═══════ -->
-    <div class="section-label">
-      <span><span class="accent">▸</span>Tier shifts · current window vs prior window</span>
-      <span class="hint">GCs that moved between tiers · indicates trend, not directive</span>
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION 2 · TREND ANALYSIS
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="section-banner section-divider">Trend Analysis<span class="scope">scope: month-by-month · driven by the time-window control below</span></div>
+
+    <div class="controls" id="trend-controls">
+      <div class="scope-note">These controls only affect the per-GC chart, the aggregate WR chart, and the tier-shift detector below. Tiers and KPIs above are all-time.</div>
+      <div class="ctrl">
+        <label for="ctrl-anchor">Anchor date</label>
+        <input type="date" id="ctrl-anchor">
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-lookback">Lookback (months)</label>
+        <select id="ctrl-lookback">
+          <option value="3">3 months</option>
+          <option value="6">6 months</option>
+          <option value="12" selected>12 months</option>
+          <option value="24">24 months</option>
+          <option value="36">36 months</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label for="ctrl-compare">Compare vs (for tier shifts)</label>
+        <select id="ctrl-compare">
+          <option value="prev-window" selected>Prior window of same length</option>
+          <option value="all-time-pre">All time before window start</option>
+        </select>
+      </div>
+      <button class="btn" id="btn-trend-apply">Re-run trend</button>
     </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Pick a GC</span>
+          <select id="ctrl-gc" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:6px 10px;font-size:12px;min-width:240px"></select>
+        </div>
+        <div class="chart-wrap h360"><canvas id="chart-gc-monthly"></canvas></div>
+        <div class="cap" id="gc-monthly-cap">—</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span>Aggregate WR over time</span><span class="meta">all eligible GCs combined</span></div>
+        <div class="chart-wrap h360"><canvas id="chart-agg-monthly"></canvas></div>
+      </div>
+    </div>
+
     <div class="panel">
-      <div class="panel-title"><span>Tier movers</span><span class="meta" id="shift-meta">—</span></div>
-      <div style="overflow:auto">
+      <div class="panel-title"><span>Tier shifts · current window vs prior</span><span class="meta" id="shift-meta">—</span></div>
+      <div class="scroll-x">
         <table class="t" id="t-shift">
           <thead><tr>
             <th>GC</th>
@@ -267,38 +325,11 @@ a{color:inherit;text-decoration:none}
       </div>
     </div>
 
-    <!-- ═══════ PER-GC MONTHLY TREND ═══════ -->
-    <div class="section-label">
-      <span><span class="accent">▸</span>Per-GC monthly trend</span>
-      <span class="hint">Cohort by bid-creation month · pending bids excluded from the rate</span>
-    </div>
-    <div class="grid-2">
-      <div class="panel">
-        <div class="panel-title">
-          <span>Pick a GC</span>
-          <select id="ctrl-gc" style="background:var(--bg-hover);border:1px solid var(--border-bright);color:var(--txt-primary);padding:6px 10px;font-size:12px;min-width:240px"></select>
-        </div>
-        <div class="chart-wrap h360"><canvas id="chart-gc-monthly"></canvas></div>
-        <div class="cap" id="gc-monthly-cap">—</div>
-      </div>
-      <div class="panel">
-        <div class="panel-title"><span>Aggregate WR over time</span><span class="meta">all classified GCs combined</span></div>
-        <div class="chart-wrap h360"><canvas id="chart-agg-monthly"></canvas></div>
-      </div>
-    </div>
+    <!-- ═══════════════════════════════════════════════════════════════════
+         SECTION 3 · CURATION (aliases + exclusions)
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div class="section-banner section-divider">Curation<span class="scope">scope: alias merges + exclusion list · changes here re-run the All-Time section</span></div>
 
-    <!-- ═══════ COHORT HEATMAP ═══════ -->
-    <div class="section-label">
-      <span><span class="accent">▸</span>Cohort heatmap</span>
-      <span class="hint">Rows = top GCs by bid count · columns = months · cell = WR (red→yellow→green)</span>
-    </div>
-    <div class="panel">
-      <div class="panel-title"><span>Top 25 GCs by bid count</span><span class="meta">scroll → for older months</span></div>
-      <div id="heatmap" class="heatmap"></div>
-      <div class="cap">Empty cells = no decided bids that month for that GC. Color scale: 0% red → 35% yellow → 70%+ green.</div>
-    </div>
-
-    <!-- ═══════ POSSIBLE ALIASES ═══════ -->
     <div class="section-label">
       <span><span class="accent">▸</span>Possible aliases · review</span>
       <span class="hint" id="alias-hint">Pairs that look like the same GC under different names · accept or reject</span>
@@ -308,12 +339,10 @@ a{color:inherit;text-decoration:none}
       <div id="alias-candidates"></div>
     </div>
 
-    <!-- ═══════ ALIAS HISTORY + MANUAL CREATOR ═══════ -->
     <div class="section-label"><span><span class="accent">▸</span>Saved aliases</span><span class="hint">Persisted decisions · delete to re-surface a pair</span></div>
     <div class="panel">
       <div class="panel-title"><span>History</span><span class="meta" id="alias-history-count">—</span></div>
       <div id="alias-history"></div>
-
       <div class="manual-form">
         <div>
           <label for="m-primary">Primary GC name</label>
@@ -331,6 +360,24 @@ a{color:inherit;text-decoration:none}
       </div>
       <datalist id="gc-options"></datalist>
     </div>
+
+    <div class="section-label"><span><span class="accent">▸</span>Exclusions</span><span class="hint">Names that aren't real GCs · dropped from the analysis entirely</span></div>
+    <div class="panel">
+      <div class="panel-title"><span>Excluded GCs</span><span class="meta" id="excl-count">—</span></div>
+      <div id="excl-list"></div>
+      <div class="excl-form">
+        <div>
+          <label for="x-name">GC / name to exclude</label>
+          <input id="x-name" list="gc-options" placeholder="e.g. Semper Fi Striping, 2H Striping, Phase 1, Dallas TX">
+        </div>
+        <div>
+          <label for="x-note">Note (optional)</label>
+          <input id="x-note" placeholder="e.g. our own company / vendor / location string / project descriptor">
+        </div>
+        <button class="btn" id="x-add">Add exclusion</button>
+      </div>
+    </div>
+
   </div>
 </main>
 
@@ -342,10 +389,15 @@ setupChartTheme();
 // ────────────────────────────────────────────────────────────────────
 // Page state
 let _D = null;
-let _normalizedAll = [];      // all jobs, normalized + alias-resolved (recomputed when aliases change)
-let _byGCAllTime = [];
+let _normalizedAll = [];      // jobs from applyKnowifyRules + alias-resolved + exclusions applied
+let _byGCAllTime = [];        // post-min-bids
+let _byGCRaw = [];            // pre-min-bids (used for alias candidate detection)
 let _charts = {};
 let _selectedGC = null;
+let _monthlyCache = null;
+let _renderInFlight = false;
+let _aliasesReady = false;
+let _exclusionsReady = false;
 
 // ────────────────────────────────────────────────────────────────────
 // Boot
@@ -358,27 +410,29 @@ loadDashboard(function (D, raw) {
   document.getElementById('content').style.display = 'block';
   setMeta(D);
 
-  // Default anchor = today
-  const today = new Date().toISOString().slice(0, 10);
-  document.getElementById('ctrl-anchor').value = today;
+  // Default trend anchor = today
+  document.getElementById('ctrl-anchor').value = new Date().toISOString().slice(0, 10);
 
-  // Initial render now (before aliases load — uses static map only).
-  recomputeAndRender();
-
-  // Re-render whenever aliases change (Firebase live update).
-  if (window.GCAliases) {
-    window.GCAliases.onChange(function () {
-      recomputeAndRender();
-    });
-  }
-
-  // Wire controls.
-  document.getElementById('btn-apply').addEventListener('click', recomputeAndRender);
+  // Wire control buttons
+  document.getElementById('btn-alltime-apply').addEventListener('click', recomputeAndRender);
+  document.getElementById('btn-trend-apply').addEventListener('click', renderTrendOnly);
   document.getElementById('ctrl-gc').addEventListener('change', function (e) {
     _selectedGC = e.target.value;
     renderGCMonthly();
   });
   document.getElementById('m-add').addEventListener('click', addManualAlias);
+  document.getElementById('x-add').addEventListener('click', addExclusion);
+
+  // Re-render whenever aliases or exclusions change.
+  if (window.GCAliases) {
+    window.GCAliases.onChange(function () { _aliasesReady = true; recomputeAndRender(); });
+  }
+  if (window.GCExclusions) {
+    window.GCExclusions.onChange(function () { _exclusionsReady = true; recomputeAndRender(); });
+  }
+
+  // Initial render (alias/exclusion modules will fire onChange shortly after).
+  recomputeAndRender();
 });
 
 function setMeta(D) {
@@ -391,55 +445,49 @@ function setMeta(D) {
     : 'No Knowify export timestamp.';
 }
 
-// Read current control values.
 function getOpts() {
   return {
-    asOf: document.getElementById('ctrl-anchor').value || new Date().toISOString().slice(0, 10),
-    lookbackMonths: parseInt(document.getElementById('ctrl-lookback').value, 10) || 12,
     minBids: parseInt(document.getElementById('ctrl-min-bids').value, 10) || 5,
     rateBasis: document.getElementById('ctrl-rate-basis').value,
+    asOf: document.getElementById('ctrl-anchor').value || new Date().toISOString().slice(0, 10),
+    lookbackMonths: parseInt(document.getElementById('ctrl-lookback').value, 10) || 12,
     compare: document.getElementById('ctrl-compare').value,
   };
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Recompute everything from current state.
-// Each render function is wrapped in try/catch so one failure doesn't
-// kill the rest of the page. The expensive O(n²) findOverlaps and the
-// 200-entry datalist population are deferred to the next frame so the
-// initial paint isn't blocked. monthlySeries is cached on the module
-// state so renderHeatmap/renderGCMonthly/renderAggMonthly don't each
-// recompute it.
-let _monthlyCache = null;
-let _renderInFlight = false;
+// Recompute everything (all-time + trend).
 function recomputeAndRender() {
   if (!_D) return;
-  if (_renderInFlight) return; // collapse re-entrant calls (Firebase live + initial)
+  if (_renderInFlight) return;
   _renderInFlight = true;
   try {
     const E = window.WinRateEngine;
-    if (!E) { console.error('WinRateEngine not loaded'); _renderInFlight = false; return; }
-    _normalizedAll = E.normalizeJobs(_D['knowify-jobs'].jobs || {}, {});
-    _byGCAllTime = E.byGCAllTime(_normalizedAll, { excludeArtifact: true });
-    _monthlyCache = null; // invalidate
+    if (!E) { console.error('WinRateEngine missing'); _renderInFlight = false; return; }
+    const opts = getOpts();
+    _normalizedAll = E.normalizeFromRules(_D);
+    _byGCRaw = E.byGCAllTime(_normalizedAll, { excludeArtifact: true });
+    _byGCAllTime = E.applyMinBids(_byGCRaw, opts.minBids);
+    _monthlyCache = null;
 
     const safe = function (name, fn) {
       try { fn(); } catch (e) { console.error('[winrates:' + name + ']', e); }
     };
+    // ALL-TIME
     safe('KPIs',          renderKPIs);
     safe('TierBands',     renderTierBands);
     safe('TierDistChart', renderTierDistChart);
     safe('Histogram',     renderHistogram);
+    safe('YoY',           renderYearOverYear);
     safe('AllGCTable',    renderAllGCTable);
-    safe('TierShift',     renderTierShift);
+    // TREND
     safe('GCDropdown',    renderGCDropdown);
     safe('GCMonthly',     renderGCMonthly);
     safe('AggMonthly',    renderAggMonthly);
-    safe('Heatmap',       renderHeatmap);
+    safe('TierShift',     renderTierShift);
+    // CURATION
     safe('AliasHistory',  renderAliasHistory);
-    // Defer the expensive O(n²) overlap detection + the 200-entry datalist
-    // build to the next animation frame. The page is interactive immediately;
-    // these arrive ~16ms later.
+    safe('Exclusions',    renderExclusionList);
     setTimeout(function () {
       safe('AliasCandidates', renderAliasCandidates);
       safe('Datalist',        populateDatalist);
@@ -449,22 +497,26 @@ function recomputeAndRender() {
   }
 }
 
-// Memoizing wrapper around WinRateEngine.monthlySeries with the current
-// window options. Invalidated whenever recomputeAndRender re-normalizes.
+// Trend section refresh only (avoid recomputing all-time agg).
+function renderTrendOnly() {
+  _monthlyCache = null;
+  try { renderGCDropdown(); } catch(e) { console.error(e); }
+  try { renderGCMonthly(); } catch(e) { console.error(e); }
+  try { renderAggMonthly(); } catch(e) { console.error(e); }
+  try { renderTierShift(); } catch(e) { console.error(e); }
+}
+
 function _getMonthly() {
   if (_monthlyCache) return _monthlyCache;
   const opts = getOpts();
-  const E = window.WinRateEngine;
-  _monthlyCache = E.monthlySeries(_normalizedAll, {
-    asOf: opts.asOf,
-    lookbackMonths: opts.lookbackMonths || 12,
-    minBidsForSeries: opts.minBids,
+  _monthlyCache = window.WinRateEngine.monthlySeries(_normalizedAll, {
+    asOf: opts.asOf, lookbackMonths: opts.lookbackMonths || 12,
   });
   return _monthlyCache;
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Top KPIs
+// KPIs
 function renderKPIs() {
   const opts = getOpts();
   const E = window.WinRateEngine;
@@ -477,6 +529,7 @@ function renderKPIs() {
   const lostCV      = _byGCAllTime.reduce((s, r) => s + (r.lostCV || 0), 0);
   const blendedWR   = decided > 0 ? +(wins / decided * 100).toFixed(1) : null;
   const dollarWR    = (wonCV + lostCV) > 0 ? +(wonCV / (wonCV + lostCV) * 100).toFixed(1) : null;
+  const droppedByMinBids = _byGCRaw.length - _byGCAllTime.length;
 
   const kpi = (label, value, opts2 = {}) => `
     <div class="kpi" style="--kpi-color:var(--${opts2.color || 'border-bright'})">
@@ -485,7 +538,7 @@ function renderKPIs() {
       <div class="kpi-sub">${opts2.sub || '&nbsp;'}</div>
     </div>`;
   document.getElementById('kpi-row').innerHTML = [
-    kpi('GCs analyzed', String(_byGCAllTime.length), { color: 'yellow', sub: 'after alias resolution' }),
+    kpi('GCs analyzed', String(_byGCAllTime.length), { color: 'yellow', sub: droppedByMinBids + ' dropped (< ' + opts.minBids + ' bids)' }),
     kpi('Total bids',   String(totalBids), { color: 'blue', sub: decided + ' decided · ' + (totalBids - decided) + ' pending' }),
     kpi('Win rate (count)', blendedWR != null ? blendedWR + '%' : '—', { color: 'green', sub: wins + ' wins / ' + decided + ' decided' }),
     kpi('Win rate ($)',     dollarWR != null ? dollarWR + '%' : '—', { color: 'green', sub: '$ won / $ decided' }),
@@ -495,21 +548,18 @@ function renderKPIs() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Tier bands (color-coded summary blocks)
+// Tier bands
 function renderTierBands() {
   const opts = getOpts();
   const E = window.WinRateEngine;
   const tiers = E.classifyTiers(_byGCAllTime, { minBids: opts.minBids, useDollar: opts.rateBasis === 'dollar' });
-  const wrap = document.getElementById('tier-bands');
   const TIERS = [
     { key: 'T1', cls: 't1', label: 'Tier 1 · ≥70% WR', desc: 'Strong delivery — these GCs award SFS at a high clip historically.' },
     { key: 'T2', cls: 't2', label: 'Tier 2 · 30–69% WR', desc: 'Active competitive — neither favored nor blocked.' },
     { key: 'T3', cls: 't3', label: 'Tier 3 · 1–29% WR', desc: 'Low conversion — pattern not yet zero, but well below average.' },
     { key: 'T0', cls: 't0', label: 'Tier 0 · 0% WR', desc: 'Zero wins despite ' + opts.minBids + '+ decided. Often chain-locked or incumbent-controlled.' },
-    { key: 'belowSample', cls: 'lo', label: 'Below sample · <' + opts.minBids + ' decided', desc: 'Not enough decided bids to score reliably. Could be new GCs or thin history.' },
   ];
-  wrap.innerHTML = TIERS.map(t => {
-    const sm = tiers.summary[t.key === 'belowSample' ? 'T1' : t.key]; // belowSample has no summary entry; show counts
+  document.getElementById('tier-bands').innerHTML = TIERS.map(t => {
     const list = tiers[t.key] || [];
     const bids = list.reduce((s, r) => s + (r.bids || 0), 0);
     const wonCV = list.reduce((s, r) => s + (r.wonCV || 0), 0);
@@ -522,10 +572,11 @@ function renderTierBands() {
         <div style="font-size:12px;color:var(--txt-muted);line-height:1.5">${t.desc}</div>
       </div>`;
   }).join('');
+  document.getElementById('tier-dist-meta').textContent = 'min bids ' + opts.minBids + ' · ' + (opts.rateBasis === 'dollar' ? '$-weighted' : 'count-based');
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Tier distribution donut chart
+// Tier distribution donut
 function renderTierDistChart() {
   const opts = getOpts();
   const tiers = window.WinRateEngine.classifyTiers(_byGCAllTime, { minBids: opts.minBids, useDollar: opts.rateBasis === 'dollar' });
@@ -534,11 +585,11 @@ function renderTierDistChart() {
   _charts.tierDist = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['T1 (≥70%)', 'T2 (30-69%)', 'T3 (1-29%)', 'T0 (0%)', 'Below sample'],
+      labels: ['T1 (≥70%)', 'T2 (30-69%)', 'T3 (1-29%)', 'T0 (0%)'],
       datasets: [{
-        data: [tiers.counts.T1, tiers.counts.T2, tiers.counts.T3, tiers.counts.T0, tiers.counts.belowSample],
-        backgroundColor: [CHART_COLORS.green + 'cc', CHART_COLORS.blue + 'cc', CHART_COLORS.orange + 'cc', CHART_COLORS.red + 'cc', CHART_COLORS.muted + 'cc'],
-        borderColor:     [CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.orange, CHART_COLORS.red, CHART_COLORS.muted],
+        data: [tiers.counts.T1, tiers.counts.T2, tiers.counts.T3, tiers.counts.T0],
+        backgroundColor: [CHART_COLORS.green + 'cc', CHART_COLORS.blue + 'cc', CHART_COLORS.orange + 'cc', CHART_COLORS.red + 'cc'],
+        borderColor:     [CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.orange, CHART_COLORS.red],
         borderWidth: 1,
       }],
     },
@@ -548,11 +599,10 @@ function renderTierDistChart() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Win-rate histogram (10pt bins)
+// Win-rate histogram
 function renderHistogram() {
-  const opts = getOpts();
-  const eligible = _byGCAllTime.filter(r => (r.wins + r.losses) >= opts.minBids && r.wr != null);
-  const bins = new Array(11).fill(0); // 0,1-10,11-20,...,91-100. Cell 0 = exact 0%.
+  const eligible = _byGCAllTime.filter(r => r.decided > 0 && r.wr != null);
+  const bins = new Array(11).fill(0);
   eligible.forEach(r => {
     if (r.wr === 0) bins[0]++;
     else {
@@ -577,29 +627,129 @@ function renderHistogram() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// All GCs table — sortable, clickable
+// Year-over-year aggregate (replaces heatmap).
+// Bar chart: years on X-axis. Each year shows a stacked bar of wins vs losses.
+// Line overlay: aggregate WR per year.
+function renderYearOverYear() {
+  const E = window.WinRateEngine;
+  const years = E.yearList(_byGCAllTime, 7);
+  if (!years.length) {
+    document.getElementById('yoy-meta').textContent = 'no year-tagged data';
+    if (_charts.yoy) _charts.yoy.destroy();
+    return;
+  }
+  // Aggregate W/L by year across all classified GCs.
+  const agg = years.map(yr => {
+    let w = 0, l = 0, p = 0, won = 0, lost = 0;
+    _byGCAllTime.forEach(r => {
+      const yc = r.byYear && r.byYear[yr];
+      if (!yc) return;
+      w += yc.wins; l += yc.losses; p += yc.pending;
+      won += yc.wonCV; lost += yc.lostCV;
+    });
+    const decided = w + l;
+    return { year: yr, wins: w, losses: l, pending: p, wonCV: won, lostCV: lost, decided, wr: decided > 0 ? +(w / decided * 100).toFixed(1) : null };
+  });
+  document.getElementById('yoy-meta').textContent = years[0] + '–' + years[years.length - 1] + ' · ' + _byGCAllTime.length + ' classified GCs';
+
+  const ctx = document.getElementById('chart-yoy');
+  if (_charts.yoy) _charts.yoy.destroy();
+  _charts.yoy = new Chart(ctx, {
+    data: {
+      labels: agg.map(a => String(a.year)),
+      datasets: [
+        { type: 'bar', label: 'Wins', data: agg.map(a => a.wins),
+          backgroundColor: CHART_COLORS.green + 'cc', borderColor: CHART_COLORS.green, borderWidth: 1, stack: 's', yAxisID: 'y1' },
+        { type: 'bar', label: 'Losses', data: agg.map(a => a.losses),
+          backgroundColor: CHART_COLORS.red + 'aa', borderColor: CHART_COLORS.red, borderWidth: 1, stack: 's', yAxisID: 'y1' },
+        { type: 'line', label: 'Aggregate WR%', data: agg.map(a => a.wr),
+          borderColor: CHART_COLORS.yellow, backgroundColor: CHART_COLORS.yellow + '22',
+          borderWidth: 2.5, pointRadius: 4, tension: 0.2, yAxisID: 'y', spanGaps: true },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: {
+        y:  { position: 'left',  min: 0, max: 100, ticks: { callback: v => v + '%' }, title: { display: true, text: 'Win rate' } },
+        y1: { position: 'right', min: 0, ticks: { precision: 0 }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Decided bids' } },
+        x:  { stacked: true },
+      },
+      plugins: { tooltip: { callbacks: {
+        afterLabel: c => {
+          const a = agg[c.dataIndex];
+          return [a.decided + ' decided · ' + a.pending + ' pending', '$ won: ' + fmt(a.wonCV) + ' / $ lost: ' + fmt(a.lostCV)].join('\n');
+        },
+      } } } },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// All GCs table (with year columns)
 let _allGCSort = { key: 'bids', dir: 'desc' };
 function renderAllGCTable() {
   const opts = getOpts();
-  const tbody = document.querySelector('#t-allgc tbody');
+  const E = window.WinRateEngine;
+  const years = E.yearList(_byGCAllTime, 5); // most recent 5 years as columns
+  const headEl = document.getElementById('t-allgc-head');
+  const tbody  = document.querySelector('#t-allgc tbody');
+
+  // Build header
+  const FIXED_COLS = [
+    { key: 'gc',       label: 'GC',         numeric: false },
+    { key: 'tier',     label: 'Tier',       numeric: false },
+    { key: 'bids',     label: 'Bids',       numeric: true },
+    { key: 'wins',     label: 'Won',        numeric: true },
+    { key: 'losses',   label: 'Lost',       numeric: true },
+    { key: 'pending',  label: 'Pending',    numeric: true },
+    { key: 'wr',       label: 'WR%',        numeric: true },
+    { key: 'dollarWR', label: '$-WR%',      numeric: true },
+    { key: 'wonCV',    label: 'Won $',      numeric: true },
+  ];
+  const headHtml = FIXED_COLS.map(c => `<th class="${c.numeric?'num':''}" data-sort-key="${c.key}">${c.label}</th>`).join('')
+    + years.map(y => `<th class="num" data-sort-key="yr_${y}">${y}</th>`).join('')
+    + '<th></th>'; // exclude action column
+  headEl.innerHTML = headHtml;
+
   const tier = (r) => {
-    const dec = r.wins + r.losses;
-    if (dec < opts.minBids || r.wr == null) return { tag: 'tag-LO', label: '—' };
+    if (r.decided < opts.minBids || r.wr == null) return { tag: 'tag-LO', label: '—' };
     if (r.wr >= 70) return { tag: 'tag-T1', label: 'T1' };
     if (r.wr >= 30) return { tag: 'tag-T2', label: 'T2' };
     if (r.wr > 0)   return { tag: 'tag-T3', label: 'T3' };
     return { tag: 'tag-T0', label: 'T0' };
   };
+
+  // Sort
+  const k = _allGCSort.key, dir = _allGCSort.dir === 'asc' ? 1 : -1;
   const sorted = _byGCAllTime.slice().sort((a, b) => {
-    const k = _allGCSort.key, dir = _allGCSort.dir === 'asc' ? 1 : -1;
-    const va = a[k] != null ? a[k] : -1;
-    const vb = b[k] != null ? b[k] : -1;
+    let va, vb;
+    if (k && k.startsWith('yr_')) {
+      const yr = k.slice(3);
+      va = a.byYear && a.byYear[yr] ? (a.byYear[yr].wr != null ? a.byYear[yr].wr : -1) : -1;
+      vb = b.byYear && b.byYear[yr] ? (b.byYear[yr].wr != null ? b.byYear[yr].wr : -1) : -1;
+    } else if (k === 'tier') {
+      const order = { 'T1': 4, 'T2': 3, 'T3': 2, 'T0': 1, '—': 0 };
+      va = order[tier(a).label] || 0; vb = order[tier(b).label] || 0;
+    } else if (k === 'gc') {
+      return (a.gc.localeCompare(b.gc)) * dir;
+    } else {
+      va = a[k] != null ? a[k] : -1;
+      vb = b[k] != null ? b[k] : -1;
+    }
     if (va < vb) return -1 * dir;
     if (va > vb) return 1 * dir;
     return 0;
   });
+
+  const yrCell = (yc) => {
+    if (!yc || (yc.wins + yc.losses + yc.pending === 0)) return '<span class="empty">—</span>';
+    const wlClass = yc.wr == null ? 'muted' : yc.wr >= 70 ? 'green' : yc.wr >= 30 ? 'blue' : yc.wr > 0 ? 'orange' : 'red';
+    return '<span class="wl ' + wlClass + '">' + yc.wins + ' / ' + yc.losses + (yc.pending ? ' · ' + yc.pending + 'p' : '') + '</span>'
+      + '<span class="pct">' + (yc.wr != null ? yc.wr + '%' : '—') + '</span>';
+  };
+
   tbody.innerHTML = sorted.map(r => {
     const t = tier(r);
+    const wrClass = r.wr != null && r.wr >= 70 ? 'green' : r.wr != null && r.wr >= 30 ? 'blue' : r.wr === 0 ? 'red' : 'orange';
+    const yrCols = years.map(y => '<td class="num yr-cell">' + yrCell(r.byYear && r.byYear[y]) + '</td>').join('');
     return `<tr style="cursor:pointer" onclick="selectGC(${escapeJS(r.gc)})">
       <td><strong>${escapeHtml(r.gc)}</strong></td>
       <td><span class="${t.tag}">${t.label}</span></td>
@@ -607,92 +757,49 @@ function renderAllGCTable() {
       <td class="num green">${r.wins}</td>
       <td class="num red">${r.losses}</td>
       <td class="num muted">${r.pending}</td>
-      <td class="num ${r.wr != null && r.wr >= 70 ? 'green' : (r.wr != null && r.wr >= 30 ? 'blue' : 'orange')}">${r.wr != null ? r.wr + '%' : '—'}</td>
+      <td class="num ${wrClass}">${r.wr != null ? r.wr + '%' : '—'}</td>
       <td class="num muted">${r.dollarWR != null ? r.dollarWR + '%' : '—'}</td>
       <td class="num">${fmt(r.wonCV)}</td>
-      <td class="num muted">${fmt(r.pendingCV)}</td>
+      ${yrCols}
+      <td><button class="btn-exclude" onclick="event.stopPropagation(); excludeGCFromTable(${escapeJS(r.gc)})" title="Add this name to exclusions (drops it from the analysis)">drop</button></td>
     </tr>`;
   }).join('');
+
   // Wire header sort.
-  document.querySelectorAll('#t-allgc thead th').forEach((th, i) => {
-    const KEYS = ['gc','wr','bids','wins','losses','pending','wr','dollarWR','wonCV','pendingCV'];
+  document.querySelectorAll('#t-allgc-head th[data-sort-key]').forEach(th => {
     th.style.cursor = 'pointer';
     th.onclick = () => {
-      const k = KEYS[i];
-      _allGCSort = (_allGCSort.key === k) ? { key: k, dir: _allGCSort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'desc' };
+      const sk = th.getAttribute('data-sort-key');
+      _allGCSort = (_allGCSort.key === sk) ? { key: sk, dir: _allGCSort.dir === 'asc' ? 'desc' : 'asc' } : { key: sk, dir: 'desc' };
       renderAllGCTable();
     };
   });
+
+  document.getElementById('allgc-meta').textContent = sorted.length + ' GCs · year columns: ' + (years.join(', ') || 'none');
 }
 
 window.selectGC = function (gc) {
   _selectedGC = gc;
-  document.getElementById('ctrl-gc').value = gc;
+  const sel = document.getElementById('ctrl-gc');
+  if (sel) sel.value = gc;
   renderGCMonthly();
   document.querySelector('#chart-gc-monthly').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
-// ────────────────────────────────────────────────────────────────────
-// Tier shift detector
-function renderTierShift() {
-  const opts = getOpts();
-  const E = window.WinRateEngine;
-  const anchor = new Date(opts.asOf);
-  const lookback = opts.lookbackMonths;
-  let prevJobs, currJobs;
-  if (lookback === 0) {
-    document.querySelector('#t-shift tbody').innerHTML = '<tr><td colspan="9" class="empty">All-time mode: tier-shift comparison disabled.</td></tr>';
-    document.getElementById('shift-meta').textContent = 'all-time mode';
-    return;
-  }
-  const currStart = new Date(anchor); currStart.setMonth(currStart.getMonth() - lookback);
-  const prevEnd = new Date(currStart);
-  let prevStart;
-  if (opts.compare === 'prev-window') {
-    prevStart = new Date(prevEnd); prevStart.setMonth(prevStart.getMonth() - lookback);
-  } else {
-    // all time before current window
-    prevStart = new Date('2000-01-01');
-  }
-  currJobs = E.filterByWindow(_normalizedAll, currStart, anchor);
-  prevJobs = E.filterByWindow(_normalizedAll, prevStart, prevEnd);
-
-  const shifts = E.tierShift(currJobs, prevJobs, { minBids: opts.minBids });
-  document.getElementById('shift-meta').textContent =
-    'curr: ' + currStart.toISOString().slice(0,10) + ' → ' + anchor.toISOString().slice(0,10) +
-    ' · prev: ' + prevStart.toISOString().slice(0,10) + ' → ' + prevEnd.toISOString().slice(0,10);
-
-  const tbody = document.querySelector('#t-shift tbody');
-  if (!shifts.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty">No tier shifts between the two windows. Either samples are too thin or rates held steady.</td></tr>';
-    return;
-  }
-  const dirIcon = (d) => d === 'up' ? '<span style="color:var(--green)">↑ up</span>'
-                     : d === 'down' ? '<span style="color:var(--red)">↓ down</span>'
-                     : '<span style="color:var(--txt-muted)">— lateral</span>';
-  const tagFor = (t) => t ? `<span class="tag-${t}">${t}</span>` : '<span class="tag-LO">—</span>';
-  tbody.innerHTML = shifts.map(s => `
-    <tr>
-      <td><strong>${escapeHtml(s.gc)}</strong></td>
-      <td class="num">${tagFor(s.prevTier)}</td>
-      <td class="num muted">→</td>
-      <td class="num">${tagFor(s.currTier)}</td>
-      <td class="num muted">${s.prevWR != null ? s.prevWR + '%' : '—'}</td>
-      <td class="num ${s.currWR != null && s.currWR >= 70 ? 'green' : (s.currWR != null && s.currWR >= 30 ? 'blue' : 'orange')}">${s.currWR != null ? s.currWR + '%' : '—'}</td>
-      <td class="num muted">${s.prevBids}</td>
-      <td class="num">${s.currBids}</td>
-      <td>${dirIcon(s.direction)}</td>
-    </tr>`).join('');
-}
+window.excludeGCFromTable = async function (gc) {
+  if (!confirm('Drop "' + gc + '" from the analysis? You can remove the exclusion later in the Curation section.')) return;
+  try {
+    await window.GCExclusions.addExclusion({ name: gc, note: 'added via row "drop" button' });
+  } catch (e) { alert('Failed: ' + (e.message || e)); }
+};
 
 // ────────────────────────────────────────────────────────────────────
-// Per-GC monthly trend
+// TREND · per-GC monthly + aggregate + tier shifts
 function renderGCDropdown() {
   const sel = document.getElementById('ctrl-gc');
-  const opts = getOpts();
-  const eligible = _byGCAllTime.filter(r => r.bids >= opts.minBids).slice().sort((a, b) => b.bids - a.bids);
-  if (!eligible.length) { sel.innerHTML = '<option value="">No GCs with enough bids</option>'; return; }
-  if (!_selectedGC) _selectedGC = eligible[0].gc;
+  const eligible = _byGCAllTime.slice().sort((a, b) => b.bids - a.bids);
+  if (!eligible.length) { sel.innerHTML = '<option value="">No eligible GCs</option>'; return; }
+  if (!_selectedGC || !eligible.find(r => r.gc === _selectedGC)) _selectedGC = eligible[0].gc;
   sel.innerHTML = eligible.map(r => {
     const tag = r.wr == null ? '—' : (r.wr >= 70 ? 'T1' : r.wr >= 30 ? 'T2' : r.wr > 0 ? 'T3' : 'T0');
     return `<option value="${escapeAttr(r.gc)}" ${r.gc === _selectedGC ? 'selected' : ''}>${escapeHtml(r.gc)} · ${r.bids}b · ${tag} · ${r.wr != null ? r.wr + '%' : '—'}</option>`;
@@ -701,7 +808,6 @@ function renderGCDropdown() {
 
 function renderGCMonthly() {
   const opts = getOpts();
-  const E = window.WinRateEngine;
   const ctx = document.getElementById('chart-gc-monthly');
   const cap = document.getElementById('gc-monthly-cap');
   if (!_selectedGC) {
@@ -755,7 +861,6 @@ function renderGCMonthly() {
 
 function renderAggMonthly() {
   const series = _getMonthly();
-  // Aggregate across all GCs per month.
   const agg = series.months.map(m => ({ ym: m.ym, label: m.label, wins: 0, losses: 0, pending: 0 }));
   Object.values(series.byGC).forEach(g => {
     g.series.forEach((s, i) => {
@@ -791,104 +896,98 @@ function renderAggMonthly() {
   });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Cohort heatmap
-function renderHeatmap() {
-  const series = _getMonthly();
-  const TOP = 25;
-  const list = Object.values(series.byGC).sort((a, b) => b.totalBids - a.totalBids).slice(0, TOP);
-  const heatmap = document.getElementById('heatmap');
-  if (!list.length) {
-    heatmap.innerHTML = '<div class="empty">No GCs meet the bid threshold in this window.</div>';
+function renderTierShift() {
+  const opts = getOpts();
+  const E = window.WinRateEngine;
+  const anchor = new Date(opts.asOf);
+  const lookback = opts.lookbackMonths;
+  const currStart = new Date(anchor); currStart.setMonth(currStart.getMonth() - lookback);
+  const prevEnd = new Date(currStart);
+  let prevStart;
+  if (opts.compare === 'prev-window') {
+    prevStart = new Date(prevEnd); prevStart.setMonth(prevStart.getMonth() - lookback);
+  } else {
+    prevStart = new Date('2000-01-01');
+  }
+  const currJobs = E.filterByWindow(_normalizedAll, currStart, anchor);
+  const prevJobs = E.filterByWindow(_normalizedAll, prevStart, prevEnd);
+  const shifts = E.tierShift(currJobs, prevJobs, { minBids: opts.minBids });
+
+  document.getElementById('shift-meta').textContent =
+    'curr: ' + currStart.toISOString().slice(0,10) + ' → ' + anchor.toISOString().slice(0,10) +
+    ' · prev: ' + prevStart.toISOString().slice(0,10) + ' → ' + prevEnd.toISOString().slice(0,10);
+
+  const tbody = document.querySelector('#t-shift tbody');
+  if (!shifts.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No tier shifts between the two windows. Either samples are too thin or rates held steady.</td></tr>';
     return;
   }
-  const cols = series.months.length;
-  const colorFor = (wr) => {
-    if (wr == null) return 'transparent';
-    // 0% → red, 35% → yellow, 70%+ → green
-    if (wr <= 35) {
-      const t = wr / 35;
-      const r = Math.round(224 + (245 - 224) * t);
-      const g = Math.round(82 + (200 - 82) * t);
-      const b = Math.round(82 + (66 - 82) * t);
-      return 'rgba(' + r + ',' + g + ',' + b + ',0.85)';
-    }
-    const t = Math.min(1, (wr - 35) / 35);
-    const r = Math.round(245 + (62 - 245) * t);
-    const g = Math.round(200 + (207 - 200) * t);
-    const b = Math.round(66 + (142 - 66) * t);
-    return 'rgba(' + r + ',' + g + ',' + b + ',0.85)';
-  };
-  const header = `<div class="heatmap-row hd" style="--cols:${cols}">
-    <div class="heatmap-cat">GC · bids · WR</div>
-    ${series.months.map(m => `<div class="heatmap-cell">${m.label.split(' ')[0]}<br>'${m.ym.slice(2,4)}</div>`).join('')}
-  </div>`;
-  const rows = list.map(g => `
-    <div class="heatmap-row" style="--cols:${cols};cursor:pointer" onclick="selectGC(${escapeJS(g.gc)})" role="button">
-      <div class="heatmap-cat" title="${escapeAttr(g.gc)}"><strong>${escapeHtml(g.gc)}</strong> · ${g.totalBids}b · ${g.windowWR != null ? g.windowWR + '%' : '—'}</div>
-      ${g.series.map(s => `<div class="heatmap-cell" style="background:${colorFor(s.wr)};color:${s.wr == null ? 'var(--txt-muted)' : '#0d0f14'}" title="wins: ${s.wins} / losses: ${s.losses} / pending: ${s.pending}">${s.wr != null ? Math.round(s.wr) : '·'}</div>`).join('')}
-    </div>`).join('');
-  heatmap.innerHTML = header + rows;
+  const dirIcon = (d) => d === 'up' ? '<span style="color:var(--green)">↑ up</span>'
+                     : d === 'down' ? '<span style="color:var(--red)">↓ down</span>'
+                     : '<span style="color:var(--txt-muted)">— lateral</span>';
+  const tagFor = (t) => t ? `<span class="tag-${t}">${t}</span>` : '<span class="tag-LO">—</span>';
+  tbody.innerHTML = shifts.map(s => `
+    <tr>
+      <td><strong>${escapeHtml(s.gc)}</strong></td>
+      <td class="num">${tagFor(s.prevTier)}</td>
+      <td class="num muted">→</td>
+      <td class="num">${tagFor(s.currTier)}</td>
+      <td class="num muted">${s.prevWR != null ? s.prevWR + '%' : '—'}</td>
+      <td class="num ${s.currWR != null && s.currWR >= 70 ? 'green' : (s.currWR != null && s.currWR >= 30 ? 'blue' : 'orange')}">${s.currWR != null ? s.currWR + '%' : '—'}</td>
+      <td class="num muted">${s.prevBids}</td>
+      <td class="num">${s.currBids}</td>
+      <td>${dirIcon(s.direction)}</td>
+    </tr>`).join('');
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Possible Aliases panel
+// CURATION · aliases + exclusions
 function renderAliasCandidates() {
   const wrap = document.getElementById('alias-candidates');
   if (!window.GCAliases) {
     wrap.innerHTML = '<div class="empty">Alias module not loaded.</div>';
     return;
   }
-  const candidates = window.GCAliases.findOverlaps(_byGCAllTime, { minScore: 0.78, maxResults: 50 });
+  // Use the PRE-min-bids list so candidates aren't hidden from view.
+  const candidates = window.GCAliases.findOverlaps(_byGCRaw, { minScore: 0.78, maxResults: 50 });
   document.getElementById('alias-pair-count').textContent = candidates.length + ' candidate pair' + (candidates.length === 1 ? '' : 's');
   if (!candidates.length) {
     wrap.innerHTML = '<div class="empty">No more candidates above the 0.78 similarity threshold. Either everything’s been resolved or there are no fuzzy matches in the bid book.</div>';
     return;
   }
-  wrap.innerHTML = candidates.map((c, i) => {
-    const id = 'cand-' + i;
-    return `
-      <div class="alias-row" id="${id}">
-        <div>
-          <div class="gc">${escapeHtml(c.a)}</div>
-          <div class="meta">${c.aBids} bid${c.aBids === 1 ? '' : 's'} all-time</div>
-        </div>
-        <div>
-          <div class="gc">${escapeHtml(c.b)}</div>
-          <div class="meta">${c.bBids} bid${c.bBids === 1 ? '' : 's'} all-time</div>
-        </div>
-        <div class="score">${(c.score * 100).toFixed(0)}%<span class="reason">${c.reason}</span></div>
-        <div class="score muted" style="font-size:11px">total: ${c.aBids + c.bBids}</div>
-        <div class="actions">
-          <button class="btn-ghost btn-accept" onclick="acceptAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)}, ${c.aBids}, ${c.bBids})">Same — merge</button>
-          <button class="btn-ghost btn-reject" onclick="rejectAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)})">Different</button>
-        </div>
-      </div>`;
-  }).join('');
+  wrap.innerHTML = candidates.map((c, i) => `
+    <div class="alias-row" id="cand-${i}">
+      <div>
+        <div class="gc">${escapeHtml(c.a)}</div>
+        <div class="meta">${c.aBids} bid${c.aBids === 1 ? '' : 's'} all-time</div>
+      </div>
+      <div>
+        <div class="gc">${escapeHtml(c.b)}</div>
+        <div class="meta">${c.bBids} bid${c.bBids === 1 ? '' : 's'} all-time</div>
+      </div>
+      <div class="score">${(c.score * 100).toFixed(0)}%<span class="reason">${c.reason}</span></div>
+      <div class="score muted" style="font-size:11px">total: ${c.aBids + c.bBids}</div>
+      <div class="actions">
+        <button class="btn-ghost btn-accept" onclick="acceptAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)}, ${c.aBids}, ${c.bBids})">Same — merge</button>
+        <button class="btn-ghost btn-reject" onclick="rejectAlias(${i}, ${escapeJS(c.a)}, ${escapeJS(c.b)})">Different</button>
+      </div>
+    </div>`).join('');
 }
 
 window.acceptAlias = async function (idx, a, b, aBids, bBids) {
-  // The one with more bids becomes the primary (canonical).
   const primary = aBids >= bBids ? a : b;
   const alias   = aBids >= bBids ? b : a;
   try {
     await window.GCAliases.addAlias({ primary, alias, status: 'accepted', note: 'reviewed via winrates page' });
-    // onChange callback will trigger recomputeAndRender
-  } catch (e) {
-    alert('Failed to save alias: ' + (e.message || e));
-  }
+  } catch (e) { alert('Failed to save alias: ' + (e.message || e)); }
 };
 
 window.rejectAlias = async function (idx, a, b) {
   try {
     await window.GCAliases.addAlias({ primary: a, alias: b, status: 'rejected', note: 'flagged not-same-GC' });
-  } catch (e) {
-    alert('Failed to save decision: ' + (e.message || e));
-  }
+  } catch (e) { alert('Failed to save decision: ' + (e.message || e)); }
 };
 
-// ────────────────────────────────────────────────────────────────────
-// Alias history + manual creator
 function renderAliasHistory() {
   const wrap = document.getElementById('alias-history');
   if (!window.GCAliases) { wrap.innerHTML = '<div class="empty">—</div>'; return; }
@@ -911,11 +1010,8 @@ function renderAliasHistory() {
 
 window.deleteAliasUI = async function (key) {
   if (!confirm('Delete this alias decision? It will re-surface in candidate review next refresh.')) return;
-  try {
-    await window.GCAliases.deleteAlias(key);
-  } catch (e) {
-    alert('Failed: ' + (e.message || e));
-  }
+  try { await window.GCAliases.deleteAlias(key); }
+  catch (e) { alert('Failed: ' + (e.message || e)); }
 };
 
 async function addManualAlias() {
@@ -929,26 +1025,52 @@ async function addManualAlias() {
     document.getElementById('m-primary').value = '';
     document.getElementById('m-alias').value = '';
     document.getElementById('m-note').value = '';
-  } catch (e) {
-    alert('Failed: ' + (e.message || e));
-  }
+  } catch (e) { alert('Failed: ' + (e.message || e)); }
+}
+
+function renderExclusionList() {
+  const wrap = document.getElementById('excl-list');
+  if (!window.GCExclusions) { wrap.innerHTML = '<div class="empty">Exclusion module not loaded.</div>'; return; }
+  const list = window.GCExclusions.listExclusions();
+  document.getElementById('excl-count').textContent = list.length + ' excluded';
+  const head = `<div class="excl-row hd"><div>Name</div><div>Note</div><div>Saved</div><div></div></div>`;
+  if (!list.length) { wrap.innerHTML = head + '<div class="empty">No exclusions yet. Add the company itself, vendors, location strings, project descriptors.</div>'; return; }
+  wrap.innerHTML = head + list.map(e => `
+    <div class="excl-row">
+      <div class="name">${escapeHtml(e.name)}</div>
+      <div class="note">${escapeHtml(e.note || '—')}</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--txt-muted)">${e.ts ? e.ts.slice(0,10) : '—'}</div>
+      <div style="text-align:right"><button class="btn-del" onclick="deleteExclusionUI(${escapeJS(e.key)})">Remove</button></div>
+    </div>`).join('');
+}
+
+window.deleteExclusionUI = async function (key) {
+  if (!confirm('Remove this exclusion? The name will re-appear in the analysis.')) return;
+  try { await window.GCExclusions.removeExclusion(key); }
+  catch (e) { alert('Failed: ' + (e.message || e)); }
+};
+
+async function addExclusion() {
+  const name = document.getElementById('x-name').value.trim();
+  const note = document.getElementById('x-note').value.trim();
+  if (!name) { alert('A name is required.'); return; }
+  try {
+    await window.GCExclusions.addExclusion({ name, note });
+    document.getElementById('x-name').value = '';
+    document.getElementById('x-note').value = '';
+  } catch (e) { alert('Failed: ' + (e.message || e)); }
 }
 
 function populateDatalist() {
   const dl = document.getElementById('gc-options');
-  dl.innerHTML = _byGCAllTime.map(r => `<option value="${escapeAttr(r.gc)}">`).join('');
+  dl.innerHTML = _byGCRaw.map(r => `<option value="${escapeAttr(r.gc)}">`).join('');
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Helpers
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function escapeAttr(s) { return escapeHtml(s).replace(/'/g, '&#39;'); }
-// escapeJS produces a value safe to embed inside an HTML attribute as a JS
-// string literal — used for inline onclick="fn(${escapeJS(name)})". Without
-// this, names containing apostrophes (e.g. "McDonald's") break the JS at parse
-// time. JSON.stringify wraps the value in double quotes and escapes specials;
-// HTML-escaping then makes those quotes safe inside attribute="...".
-function escapeJS(s) { return escapeHtml(JSON.stringify(String(s == null ? '' : s))); }
+function escapeJS(s)   { return escapeHtml(JSON.stringify(String(s == null ? '' : s))); }
 </script>
 </body>
 </html>
